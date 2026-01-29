@@ -7,11 +7,10 @@ on:
     branches: ["main", "master"]
   workflow_dispatch:  # 允许手动触发
 
-# 添加工作流级别的权限配置
 permissions:
-  contents: write  # 允许写入内容到仓库
-  pages: write    # 允许部署到GitHub Pages
-  id-token: write # 允许使用OIDC令牌
+  contents: write
+  pages: write
+  id-token: write
 
 jobs:
   convert-md-to-pdf:
@@ -21,12 +20,21 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # 获取所有历史，以便处理所有文件
+          fetch-depth: 0
       
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y pandoc texlive-xetex texlive-latex-extra texlive-fonts-recommended
+          sudo apt-get install -y \
+            pandoc \
+            texlive-xetex \
+            texlive-latex-extra \
+            texlive-fonts-recommended \
+            fonts-noto-cjk \
+            fonts-wqy-microhei \
+            fonts-wqy-zenhei \
+            lmodern \
+            tree
           pandoc --version
       
       - name: Find Markdown files
@@ -35,7 +43,7 @@ jobs:
           # 查找所有md文件，排除node_modules等目录
           MD_FILES=$(find . -name "*.md" -not -path "./.*" -not -path "*/node_modules/*" | sed 's/^\.\///')
           
-          # 使用heredoc格式输出，避免特殊字符问题
+          # 使用heredoc格式输出
           {
             echo "found_md_files<<EOF"
             echo "$MD_FILES"
@@ -56,72 +64,89 @@ jobs:
       
       - name: Convert Markdown to PDF
         run: |
-          # 注意：使用heredoc格式时，输出变量已经是原始文本，无需解码
-          # 但由于安全考虑，我们将输出存储到变量中
           MD_FILES="${{ steps.find-md.outputs.found_md_files }}"
           
-          # 记录开始时间
           echo "开始转换Markdown文件到PDF..."
           echo "找到的文件列表:"
           echo "$MD_FILES"
           
+          # 设置变量
           IFS=$'\n'
           converted_count=0
           failed_count=0
           
           for md_file in $MD_FILES; do
-            # 跳过空行
             [ -z "$md_file" ] && continue
             
-            # 获取文件名和目录
             dir_name=$(dirname "$md_file")
             base_name=$(basename "$md_file" .md)
             
-            # 创建对应的输出目录
+            # 创建输出目录
             mkdir -p "pdf_output/$dir_name"
             
             echo "正在转换: $md_file"
             
-            # 转换PDF
-            if [ -d "$dir_name/picture" ] || [ -d "$dir_name/resource" ]; then
-              # 如果存在picture或resource目录，先复制资源
-              mkdir -p "pdf_output/$dir_name"
-              [ -d "$dir_name/picture" ] && cp -r "$dir_name/picture" "pdf_output/$dir_name/" 2>/dev/null || true
-              [ -d "$dir_name/resource" ] && cp -r "$dir_name/resource" "pdf_output/$dir_name/" 2>/dev/null || true
+            # 获取Markdown文件所在目录的绝对路径
+            md_dir=$(dirname "$md_file")
+            
+            # 复制资源文件到输出目录
+            if [ -d "$dir_name/picture" ]; then
+              mkdir -p "pdf_output/$dir_name/picture"
+              cp -r "$dir_name/picture"/* "pdf_output/$dir_name/picture/" 2>/dev/null || true
             fi
             
-            # 使用pandoc转换PDF
-            if pandoc "$md_file" \
+            if [ -d "$dir_name/resource" ]; then
+              mkdir -p "pdf_output/$dir_name/resource"
+              cp -r "$dir_name/resource"/* "pdf_output/$dir_name/resource/" 2>/dev/null || true
+            fi
+            
+            # 创建临时目录用于图片
+            temp_dir=$(mktemp -d)
+            
+            # 转换PDF - 使用set +e忽略pandoc警告
+            set +e
+            pandoc "$md_file" \
+              --resource-path="$md_dir:." \
               -o "pdf_output/$dir_name/$base_name.pdf" \
               --pdf-engine=xelatex \
+              -V mainfont="Noto Sans CJK SC" \
               -V geometry:margin=1in \
               -V colorlinks=true \
               -V linkcolor=blue \
               -V urlcolor=blue \
               --highlight-style=tango \
-              -V lang=en 2>&1; then
-              
-              # 检查是否转换成功
-              if [ -f "pdf_output/$dir_name/$base_name.pdf" ]; then
-                echo "✓ 成功转换: $md_file -> pdf_output/$dir_name/$base_name.pdf"
-                ((converted_count++))
-              else
-                echo "✗ 文件创建失败: $md_file"
-                ((failed_count++))
-              fi
+              -V lang=zh-CN \
+              --fail-if-warning 2>&1 | tee "$temp_dir/pandoc.log"
+            
+            pandoc_exit=$?
+            set -e
+            
+            # 清理临时目录
+            rm -rf "$temp_dir"
+            
+            # 检查PDF是否生成（不检查pandoc退出码，因为警告也会导致非0退出码）
+            if [ -f "pdf_output/$dir_name/$base_name.pdf" ]; then
+              echo "✓ 成功转换: $md_file -> pdf_output/$dir_name/$base_name.pdf"
+              ((converted_count++))
             else
-              echo "✗ pandoc转换失败: $md_file"
+              echo "✗ 转换失败: $md_file"
+              echo "Pandoc退出码: $pandoc_exit"
               ((failed_count++))
             fi
           done
           
-          # 输出统计信息
           echo ""
           echo "================================"
           echo "转换完成!"
           echo "成功: $converted_count 个文件"
           echo "失败: $failed_count 个文件"
           echo "================================"
+          
+          # 如果所有文件都失败，则退出
+          if [ $converted_count -eq 0 ] && [ $failed_count -gt 0 ]; then
+            echo "错误: 没有成功转换任何文件"
+            exit 1
+          fi
       
       - name: Create conversion summary
         run: |
@@ -132,48 +157,46 @@ jobs:
           echo "## Converted Files:" >> pdf_output/SUMMARY.md
           echo "" >> pdf_output/SUMMARY.md
           
-          # 统计转换的PDF文件
           pdf_count=0
-          find pdf_output -name "*.pdf" | while read pdf_file; do
+          find pdf_output -name "*.pdf" -type f | sort | while read pdf_file; do
             ((pdf_count++))
             rel_path=${pdf_file#pdf_output/}
             dir_name=$(dirname "$rel_path")
             base_name=$(basename "$pdf_file" .pdf)
+            file_size=$(du -h "$pdf_file" | cut -f1)
             
-            echo "- [$base_name.pdf]($rel_path)" >> pdf_output/SUMMARY.md
+            echo "- [$base_name.pdf]($rel_path) ($file_size)" >> pdf_output/SUMMARY.md
             if [ -d "pdf_output/$dir_name/picture" ]; then
-              echo "  - Contains pictures" >> pdf_output/SUMMARY.md
+              pic_count=$(find "pdf_output/$dir_name/picture" -type f 2>/dev/null | wc -l)
+              echo "  - Contains $pic_count pictures" >> pdf_output/SUMMARY.md
             fi
             if [ -d "pdf_output/$dir_name/resource" ]; then
-              echo "  - Contains resources" >> pdf_output/SUMMARY.md
+              res_count=$(find "pdf_output/$dir_name/resource" -type f 2>/dev/null | wc -l)
+              echo "  - Contains $res_count resources" >> pdf_output/SUMMARY.md
             fi
           done
           
           echo "" >> pdf_output/SUMMARY.md
           echo "## Statistics" >> pdf_output/SUMMARY.md
           echo "- Total PDF files: $pdf_count" >> pdf_output/SUMMARY.md
-          
-          # 生成索引文件
-          echo "# PDF 文件索引" > pdf_output/README.md
-          echo "" >> pdf_output/README.md
-          echo "此目录包含自动生成的PDF文件，由GitHub Actions工作流从Markdown文件转换而来。" >> pdf_output/README.md
-          echo "" >> pdf_output/README.md
-          echo "## 如何下载" >> pdf_output/README.md
-          echo "1. 在工作流的Artifacts部分找到 'pdf-documents'" >> pdf_output/README.md
-          echo "2. 点击下载整个压缩包" >> pdf_output/README.md
-          echo "3. 解压后查看所有PDF文件" >> pdf_output/README.md
+          echo "- Total size: $(du -sh pdf_output | cut -f1)" >> pdf_output/SUMMARY.md
       
-      - name: List generated PDFs
+      - name: Verify PDF generation
         run: |
-          echo "生成的PDF文件列表:"
-          find pdf_output -name "*.pdf" -type f | while read file; do
-            size=$(du -h "$file" | cut -f1)
-            echo "  - $file ($size)"
+          echo "检查生成的PDF文件..."
+          find pdf_output -name "*.pdf" -type f | while read pdf_file; do
+            size=$(du -h "$pdf_file" | cut -f1)
+            echo "✓ $pdf_file ($size)"
           done
           
+          total_pdfs=$(find pdf_output -name "*.pdf" -type f | wc -l)
           echo ""
-          echo "目录结构:"
-          tree pdf_output || ls -la pdf_output/
+          echo "总计生成 $total_pdfs 个PDF文件"
+          
+          if [ $total_pdfs -eq 0 ]; then
+            echo "错误: 没有生成PDF文件"
+            exit 1
+          fi
       
       - name: Upload PDF artifacts
         uses: actions/upload-artifact@v4
@@ -195,7 +218,6 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./pdf_output
           publish_branch: gh-pages
-          # 可选配置
           user_name: 'github-actions[bot]'
           user_email: 'github-actions[bot]@users.noreply.github.com'
           commit_message: 'Deploy PDF documents: ${{ github.sha }}'
