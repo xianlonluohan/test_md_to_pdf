@@ -34,6 +34,21 @@ jobs:
             fonts-wqy-microhei \
             fonts-wqy-zenhei
       
+      - name: Create simple template
+        run: |
+          # 创建最简单的模板
+          cat > simple-template.tex << 'EOF'
+          \usepackage{fontspec}
+          \setmainfont{Noto Serif CJK SC}
+          \usepackage{xcolor}
+          \usepackage{listings}
+          \lstset{
+            breaklines=true,
+            numbers=none,
+            backgroundcolor=\color{white},
+          }
+          EOF
+      
       - name: Find Markdown files
         id: find-md
         run: |
@@ -81,20 +96,33 @@ jobs:
             
             echo "正在转换: $md_file"
             
-            # 使用pandoc转换PDF，简化配置
+            # 方法1：使用简单模板
+            echo "使用方法1：简单模板..."
             set +e
             pandoc "$md_file" \
               -o "pdf_output/$dir_name/$base_name.pdf" \
               --pdf-engine=xelatex \
+              -H simple-template.tex \
               -V mainfont="Noto Serif CJK SC" \
               -V geometry:margin=1in \
               -V colorlinks=true \
               -V linkcolor=blue \
-              -V urlcolor=blue \
+              --listings \
               2>&1
             
             pandoc_exit=$?
             set -e
+            
+            # 如果失败，尝试更简单的版本
+            if [ ! -f "pdf_output/$dir_name/$base_name.pdf" ]; then
+              echo "方法1失败，尝试方法2：基本配置..."
+              pandoc "$md_file" \
+                -o "pdf_output/$dir_name/$base_name.pdf" \
+                --pdf-engine=xelatex \
+                -V mainfont="Noto Serif CJK SC" \
+                -V geometry:margin=1in \
+                2>&1
+            fi
             
             # 检查是否生成PDF
             if [ -f "pdf_output/$dir_name/$base_name.pdf" ]; then
