@@ -25,7 +25,6 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          # 安装必要的依赖
           sudo apt-get install -y \
             pandoc \
             texlive-xetex \
@@ -38,13 +37,6 @@ jobs:
             fonts-wqy-zenhei \
             lmodern \
             tree
-          
-          # 验证安装
-          echo "=== Pandoc 版本 ==="
-          pandoc --version
-          echo ""
-          echo "=== 可用中文字体 ==="
-          fc-list :lang=zh | head -20
       
       - name: Find Markdown files
         id: find-md
@@ -71,15 +63,13 @@ jobs:
         run: |
           mkdir -p pdf_output
       
-      - name: Create improved LaTeX template
+      - name: Create LaTeX template
         run: |
-          # 创建改进的LaTeX模板，包含所有必要的包
-          cat > /tmp/improved-template.tex << 'EOF'
+          # 创建LaTeX模板文件
+          tee /tmp/improved-template.tex > /dev/null << 'LATEX_EOF'
           \documentclass[$if(fontsize)$$fontsize$,$endif$$if(lang)$$lang$,$endif$$if(papersize)$$papersize$,$endif$]{$documentclass$}
           \usepackage{fontspec}
           \usepackage{xeCJK}
-          
-          % 添加缺少的包
           \usepackage{longtable}
           \usepackage{booktabs}
           \usepackage{array}
@@ -141,18 +131,17 @@ jobs:
           $body$
           
           \end{document}
-          EOF
+          LATEX_EOF
           
-          echo "改进的LaTeX模板已创建"
+          echo "LaTeX模板已创建到 /tmp/improved-template.tex"
       
-      - name: Convert Markdown to PDF (simplified approach)
+      - name: Convert Markdown to PDF
         run: |
           MD_FILES="${{ steps.find-md.outputs.found_md_files }}"
           
           echo "开始转换Markdown文件到PDF..."
           echo "找到的文件数量: $(echo "$MD_FILES" | wc -l)"
           
-          # 设置变量
           IFS=$'\n'
           converted_count=0
           failed_count=0
@@ -175,7 +164,6 @@ jobs:
             if [ -d "$dir_name/picture" ]; then
               mkdir -p "pdf_output/$dir_name/picture"
               find "$dir_name/picture" -type f -exec cp {} "pdf_output/$dir_name/picture/" 2>/dev/null \; || true
-              echo "  复制了 $(find "$dir_name/picture" -type f 2>/dev/null | wc -l) 张图片"
             fi
             
             if [ -d "$dir_name/resource" ]; then
@@ -183,11 +171,11 @@ jobs:
               find "$dir_name/resource" -type f -exec cp {} "pdf_output/$dir_name/resource/" 2>/dev/null \; || true
             fi
             
-            # 方法1: 使用改进的模板
-            echo "  尝试使用改进的模板转换..."
+            # 尝试使用改进的模板
+            echo "  尝试使用模板转换..."
             
-            # 使用pandoc转换，使用改进的模板
-            set +e  # 禁用错误退出，即使pandoc有警告也继续
+            # 使用set +e避免警告导致脚本退出
+            set +e
             pandoc "$md_file" \
               --resource-path="$md_dir:.:." \
               --template=/tmp/improved-template.tex \
@@ -203,8 +191,7 @@ jobs:
               --variable sansfont="Noto Sans CJK SC" \
               --variable monofont="Noto Sans Mono CJK SC" \
               --variable documentclass=article \
-              --toc 2>&1 | grep -v "^\[INFO\]" | grep -v "^$" | head -20
-            
+              --toc 2>&1 | grep -E "(Warning:|Error:)" | head -5 || true
             pandoc_exit=$?
             set -e
             
@@ -214,23 +201,10 @@ jobs:
               echo "  ✓ 成功: $base_name.pdf ($file_size)"
               ((converted_count++))
             else
-              # 方法2: 尝试简单的方法（如果模板方法失败）
+              # 尝试简单方法
               echo "  模板方法失败，尝试简单方法..."
               
-              # 创建简单的LaTeX头
-              cat > /tmp/simple-header.tex << 'EOF'
-              \usepackage{fontspec}
-              \usepackage{xeCJK}
-              \usepackage{longtable}
-              \setCJKmainfont{Noto Serif CJK SC}
-              \setmainfont{TeX Gyre Termes}
-              \usepackage{geometry}
-              \geometry{margin=1in}
-              \usepackage{hyperref}
-              \hypersetup{colorlinks=true, linkcolor=blue, urlcolor=blue}
-              EOF
-              
-              # 使用简单方法转换
+              set +e
               pandoc "$md_file" \
                 --resource-path="$md_dir:.:." \
                 -o "pdf_output/$dir_name/$base_name.pdf" \
@@ -241,8 +215,8 @@ jobs:
                 -V linkcolor=blue \
                 -V urlcolor=blue \
                 --highlight-style=tango \
-                -V lang=zh-CN \
-                --include-in-header=/tmp/simple-header.tex 2>&1 | grep -E "(Warning:|Error:)" | head -10 || true
+                -V lang=zh-CN 2>&1 | grep -E "(Warning:|Error:)" | head -5 || true
+              set -e
               
               if [ -f "pdf_output/$dir_name/$base_name.pdf" ]; then
                 file_size=$(du -h "pdf_output/$dir_name/$base_name.pdf" | cut -f1)
@@ -253,8 +227,6 @@ jobs:
                 ((failed_count++))
               fi
             fi
-            
-            echo ""
           done
           
           echo ""
@@ -264,61 +236,44 @@ jobs:
           echo "失败: $failed_count 个文件"
           echo "================================"
           
-          # 如果所有文件都失败，则退出
           if [ $converted_count -eq 0 ] && [ $failed_count -gt 0 ]; then
             echo "错误: 没有成功转换任何文件"
             exit 1
           fi
       
-      - name: Verify and count PDF files
+      - name: Verify and list PDF files
         run: |
           echo "验证生成的PDF文件..."
           
-          total_pdfs=$(find pdf_output -name "*.pdf" -type f | wc -l)
-          total_size=$(du -sh pdf_output | cut -f1)
+          total_pdfs=$(find pdf_output -name "*.pdf" -type f 2>/dev/null | wc -l)
           
           if [ $total_pdfs -eq 0 ]; then
             echo "错误: 没有找到任何PDF文件"
             exit 1
           fi
           
-          echo "总计生成 $total_pdfs 个PDF文件，总大小: $total_size"
+          echo "总计生成 $total_pdfs 个PDF文件"
           
-          # 列出所有文件
-          echo "生成的PDF文件列表:"
-          find pdf_output -name "*.pdf" -type f | sort | while read file; do
-            size=$(du -h "$file" | cut -f1)
-            echo "  - $file ($size)"
+          echo "生成的PDF文件:"
+          find pdf_output -name "*.pdf" -type f | sort | while read pdf_file; do
+            size=$(du -h "$pdf_file" | cut -f1)
+            echo "  - $pdf_file ($size)"
           done
       
-      - name: Create conversion summary
+      - name: Create README
         run: |
           echo "# PDF 转换报告" > pdf_output/README.md
           echo "" >> pdf_output/README.md
           echo "生成时间: $(date '+%Y-%m-%d %H:%M:%S')" >> pdf_output/README.md
-          echo "生成环境: GitHub Actions" >> pdf_output/README.md
           echo "" >> pdf_output/README.md
-          echo "## 已转换的PDF文件" >> pdf_output/README.md
+          echo "## 文件列表" >> pdf_output/README.md
           echo "" >> pdf_output/README.md
-          
-          echo "| 文件名 | 大小 | 路径 |" >> pdf_output/README.md
-          echo "|--------|------|------|" >> pdf_output/README.md
           
           find pdf_output -name "*.pdf" -type f | sort | while read pdf_file; do
             rel_path=${pdf_file#pdf_output/}
-            dir_name=$(dirname "$rel_path")
-            base_name=$(basename "$pdf_file" .pdf)
             file_size=$(du -h "$pdf_file" | cut -f1)
-            
-            echo "| $base_name.pdf | $file_size | [$rel_path]($rel_path) |" >> pdf_output/README.md
+            echo "- [$rel_path]($rel_path) ($file_size)" >> pdf_output/README.md
           done
-          
-          echo "" >> pdf_output/README.md
-          echo "## 使用说明" >> pdf_output/README.md
-          echo "" >> pdf_output/README.md
-          echo "1. 在工作运行的 **Artifacts** 部分下载 `pdf-documents`" >> pdf_output/README.md
-          echo "2. 解压后即可查看所有PDF文件" >> pdf_output/README.md
-          echo "3. 也可以通过 GitHub Pages 访问: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/" >> pdf_output/README.md
       
       - name: Upload PDF artifacts
         uses: actions/upload-artifact@v4
@@ -337,4 +292,3 @@ jobs:
           user_name: 'github-actions[bot]'
           user_email: 'github-actions[bot]@users.noreply.github.com'
           commit_message: 'Deploy PDF documents: ${{ github.sha }}'
-          keep_files: false
