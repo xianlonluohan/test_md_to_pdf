@@ -25,30 +25,26 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          # 安装全面的中文支持
+          # 安装必要的依赖
           sudo apt-get install -y \
             pandoc \
             texlive-xetex \
             texlive-latex-extra \
             texlive-fonts-recommended \
+            texlive-latex-recommended \
             texlive-lang-chinese \
-            texlive-lang-cyrillic \
-            texlive-lang-greek \
-            texlive-lang-other \
             fonts-noto-cjk \
-            fonts-noto-cjk-extra \
             fonts-wqy-microhei \
             fonts-wqy-zenhei \
-            fonts-arphic-ukai \
-            fonts-arphic-uming \
             lmodern \
             tree
           
           # 验证安装
-          echo "=== 已安装字体列表 ==="
-          fc-list :lang=zh
-          echo ""
+          echo "=== Pandoc 版本 ==="
           pandoc --version
+          echo ""
+          echo "=== 可用中文字体 ==="
+          fc-list :lang=zh | head -20
       
       - name: Find Markdown files
         id: find-md
@@ -75,13 +71,24 @@ jobs:
         run: |
           mkdir -p pdf_output
       
-      - name: Create custom LaTeX template for Chinese support
+      - name: Create improved LaTeX template
         run: |
-          # 创建自定义LaTeX模板来处理中文字体
-          cat > /tmp/chinese-template.tex << 'EOF'
+          # 创建改进的LaTeX模板，包含所有必要的包
+          cat > /tmp/improved-template.tex << 'EOF'
           \documentclass[$if(fontsize)$$fontsize$,$endif$$if(lang)$$lang$,$endif$$if(papersize)$$papersize$,$endif$]{$documentclass$}
           \usepackage{fontspec}
           \usepackage{xeCJK}
+          
+          % 添加缺少的包
+          \usepackage{longtable}
+          \usepackage{booktabs}
+          \usepackage{array}
+          \usepackage{hyperref}
+          \usepackage{graphicx}
+          \usepackage{geometry}
+          \usepackage{listings}
+          \usepackage{xcolor}
+          \usepackage{fancyhdr}
           
           % 设置中文字体
           \setCJKmainfont{Noto Serif CJK SC}[BoldFont=Noto Serif CJK SC Bold]
@@ -93,11 +100,30 @@ jobs:
           \setsansfont{TeX Gyre Heros}
           \setmonofont{TeX Gyre Cursor}
           
-          % 其他包
-          \usepackage{hyperref}
-          \usepackage{graphicx}
-          \usepackage{geometry}
+          % 页面设置
           \geometry{$geometry$}
+          \pagestyle{fancy}
+          
+          % 超链接设置
+          \hypersetup{
+            colorlinks=true,
+            linkcolor=blue,
+            urlcolor=blue,
+            citecolor=blue
+          }
+          
+          % 代码高亮设置
+          \lstset{
+            basicstyle=\ttfamily\small,
+            breaklines=true,
+            frame=single,
+            backgroundcolor=\color{gray!10},
+            numbers=left,
+            numberstyle=\tiny\color{gray},
+            keywordstyle=\color{blue},
+            commentstyle=\color{green!50!black},
+            stringstyle=\color{red}
+          }
           
           \title{$title$}
           \author{$author$}
@@ -107,20 +133,24 @@ jobs:
           
           \maketitle
           
+          $if(toc)$
+          \tableofcontents
+          \newpage
+          $endif$
+          
           $body$
           
           \end{document}
           EOF
           
-          echo "自定义LaTeX模板已创建"
+          echo "改进的LaTeX模板已创建"
       
-      - name: Convert Markdown to PDF (with detailed logging)
+      - name: Convert Markdown to PDF (simplified approach)
         run: |
           MD_FILES="${{ steps.find-md.outputs.found_md_files }}"
           
           echo "开始转换Markdown文件到PDF..."
-          echo "找到的文件列表:"
-          echo "$MD_FILES"
+          echo "找到的文件数量: $(echo "$MD_FILES" | wc -l)"
           
           # 设置变量
           IFS=$'\n'
@@ -145,6 +175,7 @@ jobs:
             if [ -d "$dir_name/picture" ]; then
               mkdir -p "pdf_output/$dir_name/picture"
               find "$dir_name/picture" -type f -exec cp {} "pdf_output/$dir_name/picture/" 2>/dev/null \; || true
+              echo "  复制了 $(find "$dir_name/picture" -type f 2>/dev/null | wc -l) 张图片"
             fi
             
             if [ -d "$dir_name/resource" ]; then
@@ -152,23 +183,14 @@ jobs:
               find "$dir_name/resource" -type f -exec cp {} "pdf_output/$dir_name/resource/" 2>/dev/null \; || true
             fi
             
-            # 创建临时目录用于处理
-            temp_dir=$(mktemp -d)
+            # 方法1: 使用改进的模板
+            echo "  尝试使用改进的模板转换..."
             
-            # 方法1: 使用自定义模板
-            echo "尝试使用自定义模板转换..."
-            
-            # 创建临时文件处理图片路径
-            cp "$md_file" "$temp_dir/source.md"
-            
-            # 修复图片路径
-            sed -i 's|!\[\(.*\)\](\([^)]*\))|![\1](\2)|g' "$temp_dir/source.md"
-            
-            # 使用pandoc转换，忽略警告
-            set +e
-            pandoc "$temp_dir/source.md" \
-              --resource-path="$md_dir:.:$temp_dir" \
-              --template=/tmp/chinese-template.tex \
+            # 使用pandoc转换，使用改进的模板
+            set +e  # 禁用错误退出，即使pandoc有警告也继续
+            pandoc "$md_file" \
+              --resource-path="$md_dir:.:." \
+              --template=/tmp/improved-template.tex \
               -o "pdf_output/$dir_name/$base_name.pdf" \
               --pdf-engine=xelatex \
               -V geometry:margin=1in \
@@ -180,9 +202,8 @@ jobs:
               --variable mainfont="Noto Serif CJK SC" \
               --variable sansfont="Noto Sans CJK SC" \
               --variable monofont="Noto Sans Mono CJK SC" \
-              --variable CJKmainfont="Noto Serif CJK SC" \
               --variable documentclass=article \
-              --verbose 2>&1 | tee "$temp_dir/pandoc.log"
+              --toc 2>&1 | grep -v "^\[INFO\]" | grep -v "^$" | head -20
             
             pandoc_exit=$?
             set -e
@@ -190,55 +211,50 @@ jobs:
             # 检查是否生成PDF
             if [ -f "pdf_output/$dir_name/$base_name.pdf" ]; then
               file_size=$(du -h "pdf_output/$dir_name/$base_name.pdf" | cut -f1)
-              echo "✓ 成功转换: $md_file -> pdf_output/$dir_name/$base_name.pdf ($file_size)"
+              echo "  ✓ 成功: $base_name.pdf ($file_size)"
               ((converted_count++))
             else
-              # 方法2: 尝试使用简单的方法，忽略所有警告
-              echo "自定义模板失败，尝试简单方法..."
+              # 方法2: 尝试简单的方法（如果模板方法失败）
+              echo "  模板方法失败，尝试简单方法..."
               
-              # 使用更简单的命令，忽略警告
+              # 创建简单的LaTeX头
+              cat > /tmp/simple-header.tex << 'EOF'
+              \usepackage{fontspec}
+              \usepackage{xeCJK}
+              \usepackage{longtable}
+              \setCJKmainfont{Noto Serif CJK SC}
+              \setmainfont{TeX Gyre Termes}
+              \usepackage{geometry}
+              \geometry{margin=1in}
+              \usepackage{hyperref}
+              \hypersetup{colorlinks=true, linkcolor=blue, urlcolor=blue}
+              EOF
+              
+              # 使用简单方法转换
               pandoc "$md_file" \
-                --resource-path="$md_dir:.:$temp_dir" \
+                --resource-path="$md_dir:.:." \
                 -o "pdf_output/$dir_name/$base_name.pdf" \
                 --pdf-engine=xelatex \
-                -V mainfont="WenQuanYi Micro Hei" \
+                -V mainfont="Noto Serif CJK SC" \
                 -V geometry:margin=1in \
                 -V colorlinks=true \
                 -V linkcolor=blue \
                 -V urlcolor=blue \
                 --highlight-style=tango \
-                --fail-on-warning=false \
-                --quiet 2>&1 || true
+                -V lang=zh-CN \
+                --include-in-header=/tmp/simple-header.tex 2>&1 | grep -E "(Warning:|Error:)" | head -10 || true
               
               if [ -f "pdf_output/$dir_name/$base_name.pdf" ]; then
                 file_size=$(du -h "pdf_output/$dir_name/$base_name.pdf" | cut -f1)
-                echo "✓ 简单方法成功: $md_file -> pdf_output/$dir_name/$base_name.pdf ($file_size)"
+                echo "  ✓ 简单方法成功: $base_name.pdf ($file_size)"
                 ((converted_count++))
               else
-                echo "✗ 所有方法都失败: $md_file"
-                echo "最后尝试使用最基本的方法..."
-                
-                # 方法3: 使用最基本的方法
-                pandoc "$md_file" \
-                  -o "pdf_output/$dir_name/$base_name.pdf" \
-                  --pdf-engine=xelatex \
-                  -V mainfont="SimSun" \
-                  --fail-on-warning=false \
-                  2>&1 | grep -v "Warning:" || true
-                
-                if [ -f "pdf_output/$dir_name/$base_name.pdf" ]; then
-                  file_size=$(du -h "pdf_output/$dir_name/$base_name.pdf" | cut -f1)
-                  echo "✓ 基本方法成功: $md_file -> pdf_output/$dir_name/$base_name.pdf ($file_size)"
-                  ((converted_count++))
-                else
-                  echo "✗ 转换失败: $md_file"
-                  ((failed_count++))
-                fi
+                echo "  ✗ 转换失败: $md_file"
+                ((failed_count++))
               fi
             fi
             
-            # 清理临时目录
-            rm -rf "$temp_dir"
+            echo ""
           done
           
           echo ""
@@ -262,15 +278,15 @@ jobs:
           total_size=$(du -sh pdf_output | cut -f1)
           
           if [ $total_pdfs -eq 0 ]; then
-            echo "警告: 没有找到任何PDF文件"
+            echo "错误: 没有找到任何PDF文件"
             exit 1
           fi
           
           echo "总计生成 $total_pdfs 个PDF文件，总大小: $total_size"
           
-          # 列出前10个文件
-          echo "前10个PDF文件:"
-          find pdf_output -name "*.pdf" -type f | head -10 | while read file; do
+          # 列出所有文件
+          echo "生成的PDF文件列表:"
+          find pdf_output -name "*.pdf" -type f | sort | while read file; do
             size=$(du -h "$file" | cut -f1)
             echo "  - $file ($size)"
           done
@@ -280,9 +296,13 @@ jobs:
           echo "# PDF 转换报告" > pdf_output/README.md
           echo "" >> pdf_output/README.md
           echo "生成时间: $(date '+%Y-%m-%d %H:%M:%S')" >> pdf_output/README.md
+          echo "生成环境: GitHub Actions" >> pdf_output/README.md
           echo "" >> pdf_output/README.md
-          echo "## 已转换的文件" >> pdf_output/README.md
+          echo "## 已转换的PDF文件" >> pdf_output/README.md
           echo "" >> pdf_output/README.md
+          
+          echo "| 文件名 | 大小 | 路径 |" >> pdf_output/README.md
+          echo "|--------|------|------|" >> pdf_output/README.md
           
           find pdf_output -name "*.pdf" -type f | sort | while read pdf_file; do
             rel_path=${pdf_file#pdf_output/}
@@ -290,17 +310,15 @@ jobs:
             base_name=$(basename "$pdf_file" .pdf)
             file_size=$(du -h "$pdf_file" | cut -f1)
             
-            echo "- **$base_name**" >> pdf_output/README.md
-            echo "  - 路径: [$rel_path]($rel_path)" >> pdf_output/README.md
-            echo "  - 大小: $file_size" >> pdf_output/README.md
-            
-            # 检查是否有图片
-            if [ -d "pdf_output/$dir_name/picture" ]; then
-              pic_count=$(find "pdf_output/$dir_name/picture" -type f 2>/dev/null | wc -l)
-              echo "  - 包含 $pic_count 张图片" >> pdf_output/README.md
-            fi
-            echo "" >> pdf_output/README.md
+            echo "| $base_name.pdf | $file_size | [$rel_path]($rel_path) |" >> pdf_output/README.md
           done
+          
+          echo "" >> pdf_output/README.md
+          echo "## 使用说明" >> pdf_output/README.md
+          echo "" >> pdf_output/README.md
+          echo "1. 在工作运行的 **Artifacts** 部分下载 `pdf-documents`" >> pdf_output/README.md
+          echo "2. 解压后即可查看所有PDF文件" >> pdf_output/README.md
+          echo "3. 也可以通过 GitHub Pages 访问: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/" >> pdf_output/README.md
       
       - name: Upload PDF artifacts
         uses: actions/upload-artifact@v4
