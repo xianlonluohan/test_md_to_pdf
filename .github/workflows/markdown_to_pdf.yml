@@ -74,7 +74,7 @@ jobs:
           FAILED_COUNT=0
           
           # 逐行读取文件列表
-          echo "$MD_FILES" | while IFS= read -r md_file; do
+          while IFS= read -r md_file || [ -n "$md_file" ]; do
             # 跳过空行
             if [ -z "$md_file" ]; then
               continue
@@ -89,11 +89,11 @@ jobs:
             # 创建输出目录
             mkdir -p "pdf_output/$dir_name"
             
-            # 准备LaTeX配置（不使用here-document）
-            TEX_CONFIG=$(cat << 'CONFIG_EOF'
-              \usepackage{listings}
-              \usepackage{xcolor}
-              \lstset{
+            # 准备LaTeX配置 - 使用正确的格式
+            cat > /tmp/latex_config.tex << 'EOF'
+            \usepackage{listings}
+            \usepackage{xcolor}
+            \lstset{
               basicstyle=\ttfamily\small,
               breaklines=true,
               breakatwhitespace=false,
@@ -105,15 +105,10 @@ jobs:
               numberstyle=\tiny\color{gray},
               numbersep=5pt,
               tabsize=2
-              }
-              \usepackage{fvextra}
-              \DefineVerbatimEnvironment{Highlighting}{Verbatim}{breaklines,commandchars=\\\{\}}
-              CONFIG_EOF
-            )
-                          
-            # 将配置写入临时文件
-            TEX_FILE=$(mktemp)
-            echo "$TEX_CONFIG" > "$TEX_FILE"
+            }
+            \usepackage{fvextra}
+            \DefineVerbatimEnvironment{Highlighting}{Verbatim}{breaklines,commandchars=\\\{\}}
+            EOF
             
             # 转换PDF
             set +e
@@ -129,22 +124,23 @@ jobs:
               --highlight-style=tango \
               -V lang=zh-CN \
               --listings \
-              -H "$TEX_FILE" 2>&1
+              -H /tmp/latex_config.tex 2>&1
             PANDOC_EXIT=$?
             set -e
             
             # 清理临时文件
-            rm -f "$TEX_FILE"
+            rm -f /tmp/latex_config.tex
             
             # 检查转换结果
             if [ $PANDOC_EXIT -eq 0 ] && [ -f "pdf_output/$dir_name/$base_name.pdf" ]; then
-              echo "  ✓ 转换成功: $base_name.pdf"
+              file_size=$(du -h "pdf_output/$dir_name/$base_name.pdf" | cut -f1)
+              echo "  ✓ 转换成功: $base_name.pdf ($file_size)"
               CONVERTED_COUNT=$((CONVERTED_COUNT + 1))
             else
               echo "  ✗ 转换失败: $md_file"
               FAILED_COUNT=$((FAILED_COUNT + 1))
             fi
-          done
+          done <<< "$MD_FILES"
           
           echo ""
           echo "转换完成!"
@@ -192,7 +188,7 @@ jobs:
           PDF_COUNT=$(find pdf_output -name "*.pdf" -type f 2>/dev/null | wc -l)
           
           # 创建README.md
-          cat > pdf_output/README.md << README_EOF
+          cat > pdf_output/README.md << 'EOF'
           # PDF 文档集
 
           ## 生成信息
@@ -200,7 +196,6 @@ jobs:
           - **GitHub SHA**: ${{ github.sha }}
           - **触发事件**: ${{ github.event_name }}
           - **Git 引用**: ${{ github.ref }}
-
           EOF
                     
                     # 添加tag信息
@@ -209,13 +204,13 @@ jobs:
                     fi
                     
                     # 继续写入README
-                    cat >> pdf_output/README.md << README_EOF
+                    cat >> pdf_output/README.md << 'EOF'
           - **转换统计**: ${{ steps.find-md.outputs.md_count }}个Markdown文件，生成 ${PDF_COUNT}个PDF
           - **代码换行**: 已启用（使用LaTeX listings配置）
-
+            
           ## 文件列表
 
-          README_EOF
+          EOF
           
           # 添加文件列表
           find pdf_output -name "*.pdf" -type f | sort | while read pdf_file; do
