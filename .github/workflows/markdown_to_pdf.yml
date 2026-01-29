@@ -63,78 +63,6 @@ jobs:
         run: |
           mkdir -p pdf_output
       
-      - name: Create LaTeX template
-        run: |
-          # 创建LaTeX模板文件
-          tee /tmp/improved-template.tex > /dev/null << 'LATEX_EOF'
-          \documentclass[$if(fontsize)$$fontsize$,$endif$$if(lang)$$lang$,$endif$$if(papersize)$$papersize$,$endif$]{$documentclass$}
-          \usepackage{fontspec}
-          \usepackage{xeCJK}
-          \usepackage{longtable}
-          \usepackage{booktabs}
-          \usepackage{array}
-          \usepackage{hyperref}
-          \usepackage{graphicx}
-          \usepackage{geometry}
-          \usepackage{listings}
-          \usepackage{xcolor}
-          \usepackage{fancyhdr}
-          
-          % 设置中文字体
-          \setCJKmainfont{Noto Serif CJK SC}[BoldFont=Noto Serif CJK SC Bold]
-          \setCJKsansfont{Noto Sans CJK SC}[BoldFont=Noto Sans CJK SC Bold]
-          \setCJKmonofont{Noto Sans Mono CJK SC}
-          
-          % 设置英文字体
-          \setmainfont{TeX Gyre Termes}
-          \setsansfont{TeX Gyre Heros}
-          \setmonofont{TeX Gyre Cursor}
-          
-          % 页面设置
-          \geometry{$geometry$}
-          \pagestyle{fancy}
-          
-          % 超链接设置
-          \hypersetup{
-            colorlinks=true,
-            linkcolor=blue,
-            urlcolor=blue,
-            citecolor=blue
-          }
-          
-          % 代码高亮设置
-          \lstset{
-            basicstyle=\ttfamily\small,
-            breaklines=true,
-            frame=single,
-            backgroundcolor=\color{gray!10},
-            numbers=left,
-            numberstyle=\tiny\color{gray},
-            keywordstyle=\color{blue},
-            commentstyle=\color{green!50!black},
-            stringstyle=\color{red}
-          }
-          
-          \title{$title$}
-          \author{$author$}
-          \date{$date$}
-          
-          \begin{document}
-          
-          \maketitle
-          
-          $if(toc)$
-          \tableofcontents
-          \newpage
-          $endif$
-          
-          $body$
-          
-          \end{document}
-          LATEX_EOF
-          
-          echo "LaTeX模板已创建到 /tmp/improved-template.tex"
-      
       - name: Convert Markdown to PDF
         run: |
           MD_FILES="${{ steps.find-md.outputs.found_md_files }}"
@@ -171,27 +99,19 @@ jobs:
               find "$dir_name/resource" -type f -exec cp {} "pdf_output/$dir_name/resource/" 2>/dev/null \; || true
             fi
             
-            # 尝试使用改进的模板
-            echo "  尝试使用模板转换..."
-            
-            # 使用set +e避免警告导致脚本退出
+            # 使用pandoc转换PDF
             set +e
             pandoc "$md_file" \
               --resource-path="$md_dir:.:." \
-              --template=/tmp/improved-template.tex \
               -o "pdf_output/$dir_name/$base_name.pdf" \
               --pdf-engine=xelatex \
+              -V mainfont="Noto Serif CJK SC" \
               -V geometry:margin=1in \
               -V colorlinks=true \
               -V linkcolor=blue \
               -V urlcolor=blue \
               --highlight-style=tango \
-              -V lang=zh-CN \
-              --variable mainfont="Noto Serif CJK SC" \
-              --variable sansfont="Noto Sans CJK SC" \
-              --variable monofont="Noto Sans Mono CJK SC" \
-              --variable documentclass=article \
-              --toc 2>&1 | grep -E "(Warning:|Error:)" | head -5 || true
+              -V lang=zh-CN 2>&1
             pandoc_exit=$?
             set -e
             
@@ -199,33 +119,10 @@ jobs:
             if [ -f "pdf_output/$dir_name/$base_name.pdf" ]; then
               file_size=$(du -h "pdf_output/$dir_name/$base_name.pdf" | cut -f1)
               echo "  ✓ 成功: $base_name.pdf ($file_size)"
-              ((converted_count++))
+              converted_count=$((converted_count + 1))
             else
-              # 尝试简单方法
-              echo "  模板方法失败，尝试简单方法..."
-              
-              set +e
-              pandoc "$md_file" \
-                --resource-path="$md_dir:.:." \
-                -o "pdf_output/$dir_name/$base_name.pdf" \
-                --pdf-engine=xelatex \
-                -V mainfont="Noto Serif CJK SC" \
-                -V geometry:margin=1in \
-                -V colorlinks=true \
-                -V linkcolor=blue \
-                -V urlcolor=blue \
-                --highlight-style=tango \
-                -V lang=zh-CN 2>&1 | grep -E "(Warning:|Error:)" | head -5 || true
-              set -e
-              
-              if [ -f "pdf_output/$dir_name/$base_name.pdf" ]; then
-                file_size=$(du -h "pdf_output/$dir_name/$base_name.pdf" | cut -f1)
-                echo "  ✓ 简单方法成功: $base_name.pdf ($file_size)"
-                ((converted_count++))
-              else
-                echo "  ✗ 转换失败: $md_file"
-                ((failed_count++))
-              fi
+              echo "  ✗ 失败: $md_file"
+              failed_count=$((failed_count + 1))
             fi
           done
           
@@ -236,6 +133,7 @@ jobs:
           echo "失败: $failed_count 个文件"
           echo "================================"
           
+          # 如果所有文件都失败，则退出
           if [ $converted_count -eq 0 ] && [ $failed_count -gt 0 ]; then
             echo "错误: 没有成功转换任何文件"
             exit 1
