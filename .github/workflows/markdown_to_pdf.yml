@@ -8,7 +8,6 @@ on:
     branches: ["main", "master"]
   workflow_dispatch:  # 允许手动触发
 
-# 权限配置
 permissions:
   contents: write
   pages: write
@@ -37,10 +36,7 @@ jobs:
             fonts-noto-cjk \
             fonts-wqy-microhei \
             fonts-wqy-zenhei \
-            lmodern \
-            tree \
-            jq \
-            poppler-utils
+            lmodern
       
       - name: Find Markdown files
         id: find-md
@@ -48,24 +44,17 @@ jobs:
           # 查找所有md文件，排除node_modules等目录
           MD_FILES=$(find . -name "*.md" -not -path "./.*" -not -path "*/node_modules/*" | sed 's/^\.\///')
           
-          # 使用heredoc格式输出
-          {
-            echo "found_md_files<<EOF"
-            echo "$MD_FILES"
-            echo "EOF"
-          } >> $GITHUB_OUTPUT
-          
-          # 创建目录结构列表
-          DIRS=$(find . -type f -name "*.md" -not -path "./.*" -not -path "*/node_modules/*" -exec dirname {} \; | sort -u | sed 's/^\.\///')
-          {
-            echo "dirs<<EOF"
-            echo "$DIRS"
-            echo "EOF"
-          } >> $GITHUB_OUTPUT
-          
-          # 计算文件数量
+          # 统计文件数量
           MD_COUNT=$(echo "$MD_FILES" | wc -l)
+          
+          # 输出结果
+          echo "found_md_files<<EOF" >> $GITHUB_OUTPUT
+          echo "$MD_FILES" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+          
           echo "md_count=$MD_COUNT" >> $GITHUB_OUTPUT
+          
+          echo "找到 $MD_COUNT 个Markdown文件"
       
       - name: Set up output directory
         run: |
@@ -73,68 +62,62 @@ jobs:
       
       - name: Convert Markdown to PDF
         run: |
+          # 读取文件列表
           MD_FILES="${{ steps.find-md.outputs.found_md_files }}"
+          MD_COUNT="${{ steps.find-md.outputs.md_count }}"
           
           echo "开始转换Markdown文件到PDF..."
-          echo "找到的文件数量: ${{ steps.find-md.outputs.md_count }}"
+          echo "找到 $MD_COUNT 个Markdown文件"
           
-          IFS=$'\n'
-          converted_count=0
-          failed_count=0
+          # 初始化计数器
+          CONVERTED_COUNT=0
+          FAILED_COUNT=0
           
-          for md_file in $MD_FILES; do
-            [ -z "$md_file" ] && continue
+          # 逐行读取文件列表
+          echo "$MD_FILES" | while IFS= read -r md_file; do
+            # 跳过空行
+            if [ -z "$md_file" ]; then
+              continue
+            fi
             
+            echo "正在转换: $md_file"
+            
+            # 获取目录名和基本文件名
             dir_name=$(dirname "$md_file")
             base_name=$(basename "$md_file" .md)
             
             # 创建输出目录
             mkdir -p "pdf_output/$dir_name"
             
-            echo "正在转换: $md_file"
-            
-            # 获取Markdown文件所在目录
-            md_dir=$(dirname "$md_file")
-            
-            # 复制资源文件
-            if [ -d "$dir_name/picture" ]; then
-              mkdir -p "pdf_output/$dir_name/picture"
-              find "$dir_name/picture" -type f -exec cp {} "pdf_output/$dir_name/picture/" 2>/dev/null \; || true
-            fi
-            
-            if [ -d "$dir_name/resource" ]; then
-              mkdir -p "pdf_output/$dir_name/resource"
-              find "$dir_name/resource" -type f -exec cp {} "pdf_output/$dir_name/resource/" 2>/dev/null \; || true
-            fi
-            
-            # 方法1: 直接使用pandoc参数
-            echo "尝试方法1: 使用pandoc内置参数..."
-            
-            # 创建临时LaTeX片段
-            TEMP_TEX=$(mktemp)
-            cat > "$TEMP_TEX" << 'EOF'
+            # 准备LaTeX配置（不使用here-document）
+            TEX_CONFIG=$(cat << 'CONFIG_EOF'
               \usepackage{listings}
               \usepackage{xcolor}
               \lstset{
-                basicstyle=\ttfamily\small,
-                breaklines=true,
-                breakatwhitespace=false,
-                breakautoindent=true,
-                columns=flexible,
-                keepspaces=true,
-                showstringspaces=false,
-                numbers=left,
-                numberstyle=\tiny\color{gray},
-                numbersep=5pt,
-                tabsize=2
+              basicstyle=\ttfamily\small,
+              breaklines=true,
+              breakatwhitespace=false,
+              breakautoindent=true,
+              columns=flexible,
+              keepspaces=true,
+              showstringspaces=false,
+              numbers=left,
+              numberstyle=\tiny\color{gray},
+              numbersep=5pt,
+              tabsize=2
               }
               \usepackage{fvextra}
               \DefineVerbatimEnvironment{Highlighting}{Verbatim}{breaklines,commandchars=\\\{\}}
-              EOF
+              CONFIG_EOF
+            )
+                          
+            # 将配置写入临时文件
+            TEX_FILE=$(mktemp)
+            echo "$TEX_CONFIG" > "$TEX_FILE"
             
+            # 转换PDF
             set +e
             pandoc "$md_file" \
-              --resource-path="$md_dir:.:." \
               -o "pdf_output/$dir_name/$base_name.pdf" \
               --pdf-engine=xelatex \
               -V mainfont="Noto Serif CJK SC" \
@@ -146,110 +129,30 @@ jobs:
               --highlight-style=tango \
               -V lang=zh-CN \
               --listings \
-              -H "$TEMP_TEX" 2>&1 | tee conversion.log
-            pandoc_exit=$?
+              -H "$TEX_FILE" 2>&1
+            PANDOC_EXIT=$?
             set -e
             
-            # 如果方法1失败，尝试方法2
-            if [ ! -f "pdf_output/$dir_name/$base_name.pdf" ] || [ $pandoc_exit -ne 0 ]; then
-              echo "方法1失败，尝试方法2: 使用更多pandoc参数..."
-              
-              set +e
-              pandoc "$md_file" \
-                --resource-path="$md_dir:.:." \
-                -o "pdf_output/$dir_name/$base_name.pdf" \
-                --pdf-engine=xelatex \
-                -V mainfont="Noto Serif CJK SC" \
-                -V monofont="Noto Sans Mono" \
-                -V geometry:margin=1in \
-                -V colorlinks=true \
-                -V linkcolor=blue \
-                -V urlcolor=blue \
-                --highlight-style=tango \
-                -V lang=zh-CN \
-                --listings \
-                -V listings-options="-s breaklines=true,breakatwhitespace=false,breakautoindent=true,columns=flexible,keepspaces=true,showstringspaces=false,numbers=left,numberstyle=\\tiny\\color{gray},numbersep=5pt,tabsize=2,frame=single,framerule=0.4pt,framesep=3mm" \
-                --variable=linestretch:1.2 \
-                --variable=block-headings 2>&1 | tee conversion.log
-              pandoc_exit=$?
-              set -e
-            fi
-            
-            # 如果方法2失败，尝试方法3
-            if [ ! -f "pdf_output/$dir_name/$base_name.pdf" ] || [ $pandoc_exit -ne 0 ]; then
-              echo "方法2失败，尝试方法3: 使用默认配置..."
-              
-              set +e
-              pandoc "$md_file" \
-                --resource-path="$md_dir:.:." \
-                -o "pdf_output/$dir_name/$base_name.pdf" \
-                --pdf-engine=xelatex \
-                -V mainfont="Noto Serif CJK SC" \
-                -V monofont="Noto Sans Mono" \
-                -V geometry:"margin=1in,paper=a4paper" \
-                -V colorlinks=true \
-                -V linkcolor=blue \
-                -V urlcolor=blue \
-                --highlight-style=tango \
-                -V lang=zh-CN \
-                --wrap=auto \
-                --variable=linestretch:1.2 \
-                --variable=documentclass:article \
-                --variable=classoption:"a4paper,oneside" 2>&1 | tee conversion.log
-              pandoc_exit=$?
-              set -e
-            fi
-            
             # 清理临时文件
-            rm -f "$TEMP_TEX"
+            rm -f "$TEX_FILE"
             
-            # 记录转换日志
-            if [ -f conversion.log ]; then
-              mkdir -p "pdf_output/$dir_name/logs"
-              mv conversion.log "pdf_output/$dir_name/logs/${base_name}_conversion.log"
-            fi
-            
-            # 检查是否生成PDF
-            if [ -f "pdf_output/$dir_name/$base_name.pdf" ]; then
-              file_size=$(du -h "pdf_output/$dir_name/$base_name.pdf" | cut -f1)
-              
-              # 验证PDF文件
-              if file "pdf_output/$dir_name/$base_name.pdf" | grep -q "PDF document"; then
-                echo "  ✓ 成功: $base_name.pdf ($file_size)"
-                echo "     代码换行配置已应用"
-                converted_count=$((converted_count + 1))
-                
-                # 可选：测试代码换行效果
-                if command -v pdftotext &> /dev/null; then
-                  echo "     代码块测试: 提取部分文本验证..."
-                  pdftotext "pdf_output/$dir_name/$base_name.pdf" - 2>/dev/null | \
-                    grep -E "(code|int|void|function|class)" | head -3 | sed 's/^/        /' || true
-                fi
-              else
-                echo "  ✗ 生成的文件不是有效的PDF: $md_file"
-                failed_count=$((failed_count + 1))
-              fi
+            # 检查转换结果
+            if [ $PANDOC_EXIT -eq 0 ] && [ -f "pdf_output/$dir_name/$base_name.pdf" ]; then
+              echo "  ✓ 转换成功: $base_name.pdf"
+              CONVERTED_COUNT=$((CONVERTED_COUNT + 1))
             else
-              echo "  ✗ 失败: $md_file"
-              failed_count=$((failed_count + 1))
-              
-              # 查看失败日志
-              if [ -f "pdf_output/$dir_name/logs/${base_name}_conversion.log" ]; then
-                echo "     错误信息:"
-                tail -10 "pdf_output/$dir_name/logs/${base_name}_conversion.log" | sed 's/^/        /'
-              fi
+              echo "  ✗ 转换失败: $md_file"
+              FAILED_COUNT=$((FAILED_COUNT + 1))
             fi
           done
           
           echo ""
-          echo "================================"
           echo "转换完成!"
-          echo "成功: $converted_count 个文件"
-          echo "失败: $failed_count 个文件"
-          echo "================================"
+          echo "成功: $CONVERTED_COUNT 个文件"
+          echo "失败: $FAILED_COUNT 个文件"
           
-          # 如果所有文件都失败，则退出
-          if [ $converted_count -eq 0 ] && [ $failed_count -gt 0 ]; then
+          # 如果全部失败，则报错
+          if [ $CONVERTED_COUNT -eq 0 ] && [ $FAILED_COUNT -gt 0 ]; then
             echo "错误: 没有成功转换任何文件"
             exit 1
           fi
@@ -258,157 +161,78 @@ jobs:
         run: |
           echo "验证PDF文件..."
           
-          total_pdfs=$(find pdf_output -name "*.pdf" -type f 2>/dev/null | wc -l)
+          # 统计PDF文件数量
+          PDF_COUNT=$(find pdf_output -name "*.pdf" -type f 2>/dev/null | wc -l)
           
-          if [ "$total_pdfs" -eq 0 ]; then
-            echo "错误: 没有找到任何PDF文件"
+          if [ "$PDF_COUNT" -eq 0 ]; then
+            echo "错误: 没有生成任何PDF文件"
             exit 1
           fi
           
-          echo "总计生成 $total_pdfs 个PDF文件"
-          
-          echo "PDF文件列表:"
-          find pdf_output -name "*.pdf" -type f | sort | while read pdf_file; do
+          echo "成功生成 $PDF_COUNT 个PDF文件"
+          echo ""
+          echo "前5个PDF文件:"
+          find pdf_output -name "*.pdf" -type f | head -5 | while read pdf_file; do
             size=$(du -h "$pdf_file" | cut -f1)
             echo "  - $pdf_file ($size)"
           done
       
       - name: Create README
         run: |
-          echo "创建发布文档..."
+          echo "创建README文件..."
           
-          # 获取 tag 名称（如果有）
+          # 获取tag名称（如果有）
           if [[ "${{ github.ref }}" == refs/tags/* ]]; then
             TAG_NAME="${GITHUB_REF#refs/tags/}"
           else
             TAG_NAME="latest"
           fi
           
-          # 创建 README
-          echo "# PDF 文档集" > pdf_output/README.md
-          echo "" >> pdf_output/README.md
-          echo "## 生成信息" >> pdf_output/README.md
-          echo "- **生成时间**: $(date '+%Y-%m-%d %H:%M:%S')" >> pdf_output/README.md
-          echo "- **GitHub SHA**: ${{ github.sha }}" >> pdf_output/README.md
-          echo "- **触发事件**: ${{ github.event_name }}" >> pdf_output/README.md
-          echo "- **Git 引用**: ${{ github.ref }}" >> pdf_output/README.md
-          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
-            echo "- **标签**: $TAG_NAME" >> pdf_output/README.md
-          fi
-          echo "- **转换方法**: 方案三（简化配置）" >> pdf_output/README.md
-          echo "- **代码换行**: 已启用（使用LaTeX listings配置）" >> pdf_output/README.md
+          # 统计PDF数量
+          PDF_COUNT=$(find pdf_output -name "*.pdf" -type f 2>/dev/null | wc -l)
           
-          # 获取Markdown文件数量
-          MD_COUNT="${{ steps.find-md.outputs.md_count }}"
-          PDF_COUNT=$(find pdf_output -name "*.pdf" -type f | wc -l)
-          echo "- **转换统计**: ${MD_COUNT}个Markdown文件，生成 ${PDF_COUNT}个PDF" >> pdf_output/README.md
+          # 创建README.md
+          cat > pdf_output/README.md << README_EOF
+          # PDF 文档集
+
+          ## 生成信息
+          - **生成时间**: $(date '+%Y-%m-%d %H:%M:%S')
+          - **GitHub SHA**: ${{ github.sha }}
+          - **触发事件**: ${{ github.event_name }}
+          - **Git 引用**: ${{ github.ref }}
+
+          EOF
+                    
+                    # 添加tag信息
+                    if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+                      echo "- **标签**: $TAG_NAME" >> pdf_output/README.md
+                    fi
+                    
+                    # 继续写入README
+                    cat >> pdf_output/README.md << README_EOF
+          - **转换统计**: ${{ steps.find-md.outputs.md_count }}个Markdown文件，生成 ${PDF_COUNT}个PDF
+          - **代码换行**: 已启用（使用LaTeX listings配置）
+
+          ## 文件列表
+
+          README_EOF
           
-          echo "" >> pdf_output/README.md
-          
-          echo "## 文件列表" >> pdf_output/README.md
-          echo "" >> pdf_output/README.md
-          
-          # 按目录组织文件列表
-          current_dir=""
+          # 添加文件列表
           find pdf_output -name "*.pdf" -type f | sort | while read pdf_file; do
             rel_path=${pdf_file#pdf_output/}
-            dir_name=$(dirname "$rel_path")
-            file_name=$(basename "$rel_path")
             file_size=$(du -h "$pdf_file" | cut -f1)
-            
-            # 如果是新的目录，添加标题
-            if [ "$current_dir" != "$dir_name" ]; then
-              current_dir="$dir_name"
-              if [ "$dir_name" != "." ]; then
-                echo "### $dir_name/" >> pdf_output/README.md
-                echo "" >> pdf_output/README.md
-              fi
-            fi
-            
-            echo "- [$file_name]($rel_path) ($file_size)" >> pdf_output/README.md
-            
-            # 添加文件详细信息
-            if command -v pdfinfo &> /dev/null; then
-              page_count=$(pdfinfo "$pdf_file" 2>/dev/null | grep "Pages:" | awk '{print $2}' || echo "?")
-              if [ "$page_count" != "?" ] && [ ! -z "$page_count" ]; then
-                echo "  - 页数: $page_count" >> pdf_output/README.md
-              fi
-            fi
+            echo "- [$rel_path]($rel_path) ($file_size)" >> pdf_output/README.md
           done
           
           echo "" >> pdf_output/README.md
-          echo "**总计: $PDF_COUNT 个 PDF 文件**" >> pdf_output/README.md
-          echo "" >> pdf_output/README.md
-          
-          echo "## 方案三特性" >> pdf_output/README.md
-          echo "" >> pdf_output/README.md
-          echo "此版本使用简化配置方案，特点如下：" >> pdf_output/README.md
-          echo "" >> pdf_output/README.md
-          echo "1. **无需外部配置文件** - 直接在pandoc命令中配置代码换行" >> pdf_output/README.md
-          echo "2. **三重保障机制** - 如果一种方法失败，自动尝试其他方法" >> pdf_output/README.md
-          echo "3. **自动代码换行** - 使用LaTeX listings包的breaklines选项" >> pdf_output/README.md
-          echo "4. **保留原始格式** - 保持代码缩进和空格" >> pdf_output/README.md
-          echo "5. **中文支持** - 完整的中文字体和排版支持" >> pdf_output/README.md
-          
-          # 创建发布说明（只用于 tag 发布）
-          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
-            echo "# PDF 文档发布 - $TAG_NAME" > pdf_output/RELEASE_NOTES.md
-            echo "" >> pdf_output/RELEASE_NOTES.md
-            echo "## 版本信息" >> pdf_output/RELEASE_NOTES.md
-            echo "- **发布日期**: $(date '+%Y-%m-%d %H:%M:%S')" >> pdf_output/RELEASE_NOTES.md
-            echo "- **版本**: $TAG_NAME" >> pdf_output/RELEASE_NOTES.md
-            echo "- **包含文件**: $PDF_COUNT 个 PDF 文档" >> pdf_output/RELEASE_NOTES.md
-            echo "- **生成提交**: ${{ github.sha }}" >> pdf_output/RELEASE_NOTES.md
-            echo "- **转换方案**: 方案三（简化配置，三重保障）" >> pdf_output/RELEASE_NOTES.md
-            echo "- **代码换行**: ✅ 已启用（自动处理长代码行）" >> pdf_output/RELEASE_NOTES.md
-            echo "" >> pdf_output/RELEASE_NOTES.md
-            
-            echo "## 文件清单" >> pdf_output/RELEASE_NOTES.md
-            echo "" >> pdf_output/RELEASE_NOTES.md
-            echo "| 文件路径 | 大小 | 页数 |" >> pdf_output/RELEASE_NOTES.md
-            echo "|----------|------|------|" >> pdf_output/RELEASE_NOTES.md
-            
-            find pdf_output -name "*.pdf" -type f | sort | while read pdf_file; do
-              rel_path=${pdf_file#pdf_output/}
-              file_size=$(du -h "$pdf_file" | cut -f1)
-              
-              # 获取页数
-              if command -v pdfinfo &> /dev/null; then
-                page_count=$(pdfinfo "$pdf_file" 2>/dev/null | grep "Pages:" | awk '{print $2}' || echo "N/A")
-              else
-                page_count="N/A"
-              fi
-              
-              echo "| $rel_path | $file_size | $page_count |" >> pdf_output/RELEASE_NOTES.md
-            done
-            
-            echo "" >> pdf_output/RELEASE_NOTES.md
-            echo "## 使用说明" >> pdf_output/RELEASE_NOTES.md
-            echo "" >> pdf_output/RELEASE_NOTES.md
-            echo "### 下载选项" >> pdf_output/RELEASE_NOTES.md
-            echo "1. **完整包**: 下载 \`pdf-documents-$TAG_NAME.zip\` 获取所有PDF文件" >> pdf_output/RELEASE_NOTES.md
-            echo "2. **单个文件**: 从文件列表中选择需要的PDF文件" >> pdf_output/RELEASE_NOTES.md
-            echo "" >> pdf_output/RELEASE_NOTES.md
-            echo "### 代码块特性" >> pdf_output/RELEASE_NOTES.md
-            echo "- **自动换行**: 长代码行会自动分行显示" >> pdf_output/RELEASE_NOTES.md
-            echo "- **保持格式**: 代码缩进和空格被保留" >> pdf_output/RELEASE_NOTES.md
-            echo "- **语法高亮**: 使用tango风格语法高亮" >> pdf_output/RELEASE_NOTES.md
-            echo "" >> pdf_output/RELEASE_NOTES.md
-            echo "### 转换方法" >> pdf_output/RELEASE_NOTES.md
-            echo "此版本使用三重保障机制：" >> pdf_output/RELEASE_NOTES.md
-            echo "1. 使用临时LaTeX配置片段" >> pdf_output/RELEASE_NOTES.md
-            echo "2. 使用pandoc命令行参数" >> pdf_output/RELEASE_NOTES.md
-            echo "3. 使用pandoc默认配置" >> pdf_output/RELEASE_NOTES.md
-            echo "" >> pdf_output/RELEASE_NOTES.md
-            echo "如果第一种方法失败，会自动尝试下一种方法，确保转换成功。" >> pdf_output/RELEASE_NOTES.md
-          fi
+          echo "**总计: $PDF_COUNT 个PDF文件**" >> pdf_output/README.md
       
       - name: Create zip archive for release
         if: startsWith(github.ref, 'refs/tags/')
         run: |
-          echo "为 GitHub Releases 创建压缩包..."
+          echo "创建发布压缩包..."
           
-          # 获取 tag 名称
+          # 获取tag名称
           TAG_NAME="${GITHUB_REF#refs/tags/}"
           
           # 创建压缩包
@@ -416,8 +240,7 @@ jobs:
           zip -r "../pdf-documents-$TAG_NAME.zip" .
           cd ..
           
-          echo "压缩包已创建: pdf-documents-$TAG_NAME.zip"
-          ls -lh pdf-documents-*.zip
+          echo "压缩包创建完成: pdf-documents-$TAG_NAME.zip"
       
       - name: Upload PDF artifacts
         uses: actions/upload-artifact@v4
@@ -430,26 +253,34 @@ jobs:
       
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
-        id: create_release
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ github.ref_name }}
           name: "PDF Documents - ${{ github.ref_name }}"
-          body_path: pdf_output/RELEASE_NOTES.md
+          body: |
+            # PDF 文档发布 - ${{ github.ref_name }}
+            
+            ## 版本信息
+            - **发布日期**: $(date '+%Y-%m-%d %H:%M:%S')
+            - **版本**: ${{ github.ref_name }}
+            - **生成提交**: ${{ github.sha }}
+            - **代码换行**: ✅ 已启用（自动处理长代码行）
+            
+            ## 下载
+            下载 [pdf-documents-${{ github.ref_name }}.zip](pdf-documents-${{ github.ref_name }}.zip) 获取所有PDF文件。
+            
+            ## 特性
+            - 代码块自动换行
+            - 中文PDF支持
+            - 完整目录结构
           files: |
             pdf-documents-${{ github.ref_name }}.zip
           draft: false
           prerelease: false
           generate_release_notes: true
       
-      - name: Verify release creation
+      - name: Verify release
         if: startsWith(github.ref, 'refs/tags/')
         run: |
-          echo "Release 创建完成!"
-          echo "访问: https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }}"
-          echo ""
-          echo "方案三特性总结:"
-          echo "- ✅ 三重保障机制，转换成功率更高"
-          echo "- ✅ 无需外部配置文件，更简洁"
-          echo "- ✅ 代码块自动换行，支持长代码行"
-          echo "- ✅ 中文PDF支持，排版美观"
+          echo "Release创建成功!"
+          echo "访问地址: https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }}"
