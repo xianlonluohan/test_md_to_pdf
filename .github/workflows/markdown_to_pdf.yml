@@ -3,10 +3,17 @@ name: Markdown to PDF Converter
 on:
   push:
     branches: ["main", "master"]
-    tags: ["v*", "pdf-*"]  # 触发 tag 匹配模式
+    tags: ["v*", "pdf-*"]
   pull_request:
     branches: ["main", "master"]
-  workflow_dispatch:  # 允许手动触发
+  workflow_dispatch:
+
+# 添加 releases 权限
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+  releases: write  # 新增：允许创建和修改 releases
 
 jobs:
   convert-md-to-pdf:
@@ -33,7 +40,7 @@ jobs:
             fonts-wqy-zenhei \
             lmodern \
             tree \
-            jq  # 用于 JSON 处理
+            jq
       
       - name: Find Markdown files
         id: find-md
@@ -136,9 +143,9 @@ jobs:
             exit 1
           fi
       
-      - name: Create comprehensive README and release notes
+      - name: Create release documentation
         run: |
-          echo "创建详细的发布说明..."
+          echo "创建发布文档..."
           
           # 创建 README
           echo "# PDF 文档集" > pdf_output/README.md
@@ -157,6 +164,7 @@ jobs:
           echo "" >> pdf_output/README.md
           
           # 按目录组织文件列表
+          current_dir=""
           find pdf_output -name "*.pdf" -type f | sort | while read pdf_file; do
             rel_path=${pdf_file#pdf_output/}
             dir_name=$(dirname "$rel_path")
@@ -175,25 +183,18 @@ jobs:
             echo "- [$file_name]($rel_path) ($file_size)" >> pdf_output/README.md
           done
           
-          echo "" >> pdf_output/README.md
-          echo "## 下载说明" >> pdf_output/README.md
-          echo "" >> pdf_output/README.md
-          echo "1. **日常使用**: 在工作流的 Artifacts 部分下载 'pdf-documents'" >> pdf_output/README.md
-          echo "2. **正式发布**: 创建 Git tag 时，PDF 会自动发布到 GitHub Releases" >> pdf_output/README.md
+          # 创建发布说明
+          TAG_NAME="${GITHUB_REF#refs/tags/}" 2>/dev/null || TAG_NAME="unknown"
           
-          # 创建独立的 release notes
-          echo "# PDF 文档发布" > pdf_output/RELEASE_NOTES.md
+          echo "# PDF 文档发布 - $TAG_NAME" > pdf_output/RELEASE_NOTES.md
           echo "" >> pdf_output/RELEASE_NOTES.md
           echo "## 版本信息" >> pdf_output/RELEASE_NOTES.md
           echo "- **发布日期**: $(date '+%Y-%m-%d %H:%M:%S')" >> pdf_output/RELEASE_NOTES.md
-          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
-            tag_name="${GITHUB_REF#refs/tags/}"
-            echo "- **版本**: $tag_name" >> pdf_output/RELEASE_NOTES.md
-          fi
+          echo "- **版本**: $TAG_NAME" >> pdf_output/RELEASE_NOTES.md
           echo "- **包含文件**: $(find pdf_output -name "*.pdf" -type f | wc -l) 个 PDF 文档" >> pdf_output/RELEASE_NOTES.md
+          echo "- **生成提交**: ${{ github.sha }}" >> pdf_output/RELEASE_NOTES.md
           echo "" >> pdf_output/RELEASE_NOTES.md
           
-          # 创建文件清单
           echo "## 文件清单" >> pdf_output/RELEASE_NOTES.md
           echo "" >> pdf_output/RELEASE_NOTES.md
           echo "| 文件路径 | 大小 |" >> pdf_output/RELEASE_NOTES.md
@@ -218,11 +219,6 @@ jobs:
           zip -r "../pdf-documents-$TAG_NAME.zip" .
           cd ..
           
-          # 创建单独的文件列表
-          echo "压缩包内容:" > pdf_output/FILES.txt
-          echo "=============" >> pdf_output/FILES.txt
-          find pdf_output -type f | sort >> pdf_output/FILES.txt
-          
           echo "压缩包已创建: pdf-documents-$TAG_NAME.zip"
           ls -lh pdf-documents-*.zip
       
@@ -235,45 +231,42 @@ jobs:
             pdf-documents-*.zip
           retention-days: 7
       
-      - name: Create GitHub Release and Upload PDFs
+      - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v1
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          # 使用自动生成的 tag
           tag_name: ${{ github.ref_name }}
-          
-          # 发布名称
-          name: "PDF Documents - ${{ github.ref_name }}"
-          
-          # 发布说明
+          release_name: "PDF Documents - ${{ github.ref_name }}"
           body_path: pdf_output/RELEASE_NOTES.md
-          
-          # 上传所有 PDF 文件和 README
-          files: |
-            pdf_output/**/*.pdf
-            pdf_output/README.md
-            pdf_output/RELEASE_NOTES.md
-            pdf_output/FILES.txt
-            pdf-documents-${{ github.ref_name }}.zip
-          
-          # 其他选项
           draft: false
           prerelease: false
           generate_release_notes: true
       
-      - name: Verify Release Creation
+      - name: Upload Release Assets
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./pdf-documents-${{ github.ref_name }}.zip
+          asset_name: pdf-documents-${{ github.ref_name }}.zip
+          asset_content_type: application/zip
+      
+      - name: Upload individual PDFs to Release (optional)
         if: startsWith(github.ref, 'refs/tags/')
         run: |
-          echo "验证 GitHub Release 创建..."
+          echo "上传单个 PDF 文件到 Release..."
           
-          # 获取 tag 名称
-          TAG_NAME="${{ github.ref_name }}"
-          
-          echo "标签: $TAG_NAME"
-          echo "GitHub SHA: ${{ github.sha }}"
-          
-          # 等待几秒让 release 创建
-          sleep 5
-          
-          echo "Release 创建完成！"
-          echo "访问: https://github.com/${{ github.repository }}/releases/tag/$TAG_NAME"
+          # 上传所有 PDF 文件
+          find pdf_output -name "*.pdf" -type f | while read pdf_file; do
+            echo "上传: $pdf_file"
+            gh release upload ${{ github.ref_name }} "$pdf_file" \
+              --clobber \
+              --repo ${{ github.repository }}
+          done
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
