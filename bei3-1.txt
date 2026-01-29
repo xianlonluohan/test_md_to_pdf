@@ -1,0 +1,593 @@
+name: Markdown to PDF Converter
+
+on:
+  push:
+    branches: ["main", "master"]
+    tags: ["v*", "pdf-*"]
+  pull_request:
+    branches: ["main", "master"]
+  workflow_dispatch:  # 允许手动触发
+
+# 权限配置
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+jobs:
+  convert-md-to-pdf:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            pandoc \
+            texlive-xetex \
+            texlive-latex-extra \
+            texlive-fonts-recommended \
+            texlive-latex-recommended \
+            texlive-lang-chinese \
+            texlive-latex-base \
+            texlive-luatex \
+            texlive-plain-generic \
+            fonts-noto-cjk \
+            fonts-wqy-microhei \
+            fonts-wqy-zenhei \
+            lmodern \
+            cm-super \
+            tex-gyre \
+            tree \
+            jq \
+            poppler-utils \
+            ghostscript
+      
+      - name: Find Markdown files
+        id: find-md
+        run: |
+          # 查找所有md文件，排除node_modules等目录
+          MD_FILES=$(find . -name "*.md" -not -path "./.*" -not -path "*/node_modules/*" | sed 's/^\.\///')
+          
+          # 使用heredoc格式输出
+          {
+            echo "found_md_files<<EOF"
+            echo "$MD_FILES"
+            echo "EOF"
+          } >> $GITHUB_OUTPUT
+          
+          # 创建目录结构列表
+          DIRS=$(find . -type f -name "*.md" -not -path "./.*" -not -path "*/node_modules/*" -exec dirname {} \; | sort -u | sed 's/^\.\///')
+          {
+            echo "dirs<<EOF"
+            echo "$DIRS"
+            echo "EOF"
+          } >> $GITHUB_OUTPUT
+      
+      - name: Prepare LaTeX configuration for code wrapping
+        run: |
+          echo "准备LaTeX配置以支持代码块自动换行..."
+          mkdir -p .github/latex
+          
+          # 创建主配置文件
+          cat > .github/latex/code-wrap.tex << 'EOF'
+          % 代码块自动换行配置
+          \usepackage{listings}
+          \usepackage{xcolor}
+          \usepackage{fvextra}
+          \usepackage{tcolorbox}
+          \tcbuselibrary{listings, breakable, skins}
+          
+          % 定义颜色
+          \definecolor{codebg}{RGB}{248,248,248}
+          \definecolor{framecolor}{RGB}{221,221,221}
+          \definecolor{keywordcolor}{RGB}{0,0,255}
+          \definecolor{commentcolor}{RGB}{34,139,34}
+          \definecolor{stringcolor}{RGB}{163,21,21}
+          \definecolor{numbercolor}{RGB}{0,128,128}
+          
+          % 配置listings包
+          \lstset{
+            basicstyle=\ttfamily\footnotesize,
+            breaklines=true,                    % 启用自动换行
+            breakatwhitespace=false,            % 在任意字符处换行（不只是空格）
+            breakautoindent=true,               % 换行后保持缩进
+            columns=fullflexible,               % 灵活的列宽度
+            keepspaces=true,                    % 保留空格
+            showstringspaces=false,             % 不显示字符串中的空格
+            frame=single,                       % 单线边框
+            framesep=3pt,                       % 边框内边距
+            framerule=0.4pt,                    % 边框线宽
+            rulecolor=\color{framecolor},       % 边框颜色
+            numbers=left,                       % 行号在左侧
+            numberstyle=\tiny\color{gray},      % 行号样式
+            stepnumber=1,                       % 每行都显示行号
+            numbersep=8pt,                      % 行号与代码间距
+            tabsize=2,                          % 制表符宽度
+            escapeinside={\%*}{*)},             % 内嵌LaTeX代码的转义字符
+            backgroundcolor=\color{codebg},     % 背景色
+            xleftmargin=15pt,                   % 左边距
+            xrightmargin=5pt,                   % 右边距
+            framexleftmargin=10pt,              % 边框左边距
+            framexrightmargin=10pt,             % 边框右边距
+            framextopmargin=5pt,                % 边框上边距
+            framexbottommargin=5pt,             % 边框下边距
+            aboveskip=10pt,                     % 代码块上方间距
+            belowskip=10pt,                     % 代码块下方间距
+            showspaces=false,                   % 不显示空格标记
+            showtabs=false,                     % 不显示制表符标记
+            captionpos=b,                       % 标题位置（底部）
+            belowcaptionskip=5pt                % 标题下方间距
+          }
+          
+          % 定义各语言的高亮样式
+          \lstdefinestyle{cppstyle}{
+            language=C++,
+            keywordstyle=\color{keywordcolor}\bfseries,
+            commentstyle=\color{commentcolor}\itshape,
+            stringstyle=\color{stringcolor},
+            morekeywords={size_t, uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t},
+            deletekeywords={register}  % 移除register关键字（C++17已弃用）
+          }
+          
+          \lstdefinestyle{pythonstyle}{
+            language=Python,
+            keywordstyle=\color{keywordcolor}\bfseries,
+            commentstyle=\color{commentcolor}\itshape,
+            stringstyle=\color{stringcolor},
+            morekeywords={True, False, None, self, cls, async, await}
+          }
+          
+          \lstdefinestyle{javascriptstyle}{
+            language=JavaScript,
+            keywordstyle=\color{keywordcolor}\bfseries,
+            commentstyle=\color{commentcolor}\itshape,
+            stringstyle=\color{stringcolor},
+            morekeywords={let, const, export, import, async, await}
+          }
+          
+          \lstdefinestyle{bashstyle}{
+            language=bash,
+            keywordstyle=\color{keywordcolor}\bfseries,
+            commentstyle=\color{commentcolor}\itshape,
+            stringstyle=\color{stringcolor},
+            morekeywords={sudo, apt-get, install, update, echo, mkdir, cd, cp, mv, rm, ls}
+          }
+          
+          \lstdefinestyle{jsonstyle}{
+            language=json,
+            keywordstyle=\color{keywordcolor}\bfseries,
+            commentstyle=\color{commentcolor}\itshape,
+            stringstyle=\color{stringcolor}
+          }
+          
+          % 配置Verbatim环境（pandoc使用）
+          \fvset{
+            frame=single,
+            framesep=3mm,
+            framerule=0.4pt,
+            rulecolor=\color{framecolor},
+            numbers=left,
+            numbersep=5pt,
+            breaklines=true,
+            breakanywhere=true,
+            breakautoindent=true,
+            breakindent=0pt,
+            fontsize=\footnotesize,
+            baselinestretch=1.0,
+            obeytabs=true,
+            tabsize=2
+          }
+          
+          % 对Verbatim环境启用换行
+          \DefineVerbatimEnvironment{Highlighting}{Verbatim}{
+            breaklines=true,
+            breakanywhere=true,
+            breakautoindent=true,
+            breaksymbolleft={},
+            breaksymbolright={},
+            commandchars=\\\{\},
+            frame=single,
+            framesep=3mm,
+            rulecolor=\color{framecolor},
+            numbers=left,
+            numbersep=5pt
+          }
+          
+          % 配置tcolorbox用于代码块
+          \newtcblisting{codeblock}[2][]{
+            listing only,
+            listing options={style=#2},
+            breakable,
+            enhanced,
+            colback=codebg,
+            colframe=framecolor,
+            fonttitle=\bfseries,
+            title=代码,
+            #1
+          }
+          
+          % 设置代码块标题样式
+          \renewcommand{\lstlistingname}{代码}
+          \renewcommand{\lstlistlistingname}{代码清单}
+          EOF
+          
+          # 创建pandoc模板扩展
+          cat > .github/latex/pandoc-extras.tex << 'EOF'
+          % pandoc额外配置
+          \usepackage{float}
+          \usepackage{booktabs}
+          \usepackage{longtable}
+          \usepackage{array}
+          \usepackage{multirow}
+          \usepackage{wrapfig}
+          \usepackage{colortbl}
+          \usepackage{pdflscape}
+          \usepackage{threeparttable}
+          \usepackage[normalem]{ulem}
+          
+          % 链接设置
+          \usepackage{hyperref}
+          \hypersetup{
+            colorlinks=true,
+            linkcolor=blue,
+            urlcolor=blue,
+            citecolor=blue,
+            bookmarks=true,
+            bookmarksopen=true,
+            pdfstartview=FitH
+          }
+          
+          % 页眉页脚设置
+          \usepackage{fancyhdr}
+          \pagestyle{fancy}
+          \fancyhf{}
+          \fancyhead[L]{\leftmark}
+          \fancyhead[R]{\thepage}
+          \renewcommand{\headrulewidth}{0.4pt}
+          
+          % 设置章节样式
+          \usepackage{titlesec}
+          \titleformat{\chapter}[display]
+            {\normalfont\huge\bfseries}{\chaptertitlename\ \thechapter}{20pt}{\Huge}
+          \titleformat{\section}
+            {\normalfont\Large\bfseries}{\thesection}{1em}{}
+          \titleformat{\subsection}
+            {\normalfont\large\bfseries}{\thesubsection}{1em}{}
+          
+          % 设置行间距和段落间距
+          \setlength{\parindent}{2em}
+          \setlength{\parskip}{0.5em}
+          \renewcommand{\baselinestretch}{1.2}
+          
+          % 设置列表间距
+          \usepackage{enumitem}
+          \setlist{itemsep=2pt, topsep=5pt}
+          
+          % 设置图片和表格
+          \usepackage{graphicx}
+          \usepackage{caption}
+          \captionsetup[figure]{font=small, labelfont=bf}
+          \captionsetup[table]{font=small, labelfont=bf}
+          
+          % 防止图片和表格浮动到章节开头
+          \usepackage{placeins}
+          \let\Oldsection\section
+          \renewcommand{\section}{\FloatBarrier\Oldsection}
+          \let\Oldsubsection\subsection
+          \renewcommand{\subsection}{\FloatBarrier\Oldsubsection}
+          \let\Oldsubsubsection\subsubsection
+          \renewcommand{\subsubsection}{\FloatBarrier\Oldsubsubsection}
+          EOF
+          
+          echo "LaTeX配置创建完成"
+      
+      - name: Set up output directory
+        run: |
+          mkdir -p pdf_output
+      
+      - name: Convert Markdown to PDF with code wrapping
+        run: |
+          MD_FILES="${{ steps.find-md.outputs.found_md_files }}"
+          
+          echo "开始转换Markdown文件到PDF..."
+          echo "找到的文件数量: $(echo "$MD_FILES" | wc -l)"
+          
+          IFS=$'\n'
+          converted_count=0
+          failed_count=0
+          
+          for md_file in $MD_FILES; do
+            [ -z "$md_file" ] && continue
+            
+            dir_name=$(dirname "$md_file")
+            base_name=$(basename "$md_file" .md)
+            
+            # 创建输出目录
+            mkdir -p "pdf_output/$dir_name"
+            
+            echo "正在转换: $md_file"
+            
+            # 获取Markdown文件所在目录
+            md_dir=$(dirname "$md_file")
+            
+            # 复制资源文件
+            if [ -d "$dir_name/picture" ]; then
+              mkdir -p "pdf_output/$dir_name/picture"
+              find "$dir_name/picture" -type f -exec cp {} "pdf_output/$dir_name/picture/" 2>/dev/null \; || true
+            fi
+            
+            if [ -d "$dir_name/resource" ]; then
+              mkdir -p "pdf_output/$dir_name/resource"
+              find "$dir_name/resource" -type f -exec cp {} "pdf_output/$dir_name/resource/" 2>/dev/null \; || true
+            fi
+            
+            # 创建转换日志目录
+            mkdir -p "pdf_output/$dir_name/logs"
+            
+            echo "=== 转换详情 ===" > "pdf_output/$dir_name/logs/${base_name}_conversion.log"
+            echo "文件: $md_file" >> "pdf_output/$dir_name/logs/${base_name}_conversion.log"
+            echo "时间: $(date '+%Y-%m-%d %H:%M:%S')" >> "pdf_output/$dir_name/logs/${base_name}_conversion.log"
+            echo "目录: $dir_name" >> "pdf_output/$dir_name/logs/${base_name}_conversion.log"
+            echo "===============" >> "pdf_output/$dir_name/logs/${base_name}_conversion.log"
+            echo "" >> "pdf_output/$dir_name/logs/${base_name}_conversion.log"
+            
+            # 使用pandoc转换PDF，启用代码换行
+            set +e
+            echo "运行pandoc命令..." >> "pdf_output/$dir_name/logs/${base_name}_conversion.log"
+            
+            pandoc "$md_file" \
+              --resource-path="$md_dir:.:." \
+              -o "pdf_output/$dir_name/$base_name.pdf" \
+              --pdf-engine=xelatex \
+              --listings \
+              -H .github/latex/code-wrap.tex \
+              -H .github/latex/pandoc-extras.tex \
+              -V mainfont="Noto Serif CJK SC" \
+              -V monofont="Noto Sans Mono" \
+              -V sansfont="Noto Sans CJK SC" \
+              -V geometry:margin=1in \
+              -V geometry:left=1in,right=1in,top=1in,bottom=1in \
+              -V colorlinks=true \
+              -V linkcolor=blue \
+              -V urlcolor=blue \
+              -V citecolor=blue \
+              --highlight-style=tango \
+              -V lang=zh-CN \
+              --variable=linestretch:1.2 \
+              --variable=parindent:2em \
+              --variable=block-headings \
+              --variable=documentclass:report \
+              --variable=papersize:a4 \
+              --variable=fontsize:11pt \
+              --toc \
+              --toc-depth=3 \
+              --number-sections \
+              --wrap=preserve \
+              --verbose 2>&1 | tee -a "pdf_output/$dir_name/logs/${base_name}_conversion.log"
+            
+            pandoc_exit=$?
+            set -e
+            
+            echo "" >> "pdf_output/$dir_name/logs/${base_name}_conversion.log"
+            echo "退出代码: $pandoc_exit" >> "pdf_output/$dir_name/logs/${base_name}_conversion.log"
+            
+            # 检查是否生成PDF
+            if [ -f "pdf_output/$dir_name/$base_name.pdf" ]; then
+              file_size=$(du -h "pdf_output/$dir_name/$base_name.pdf" | cut -f1)
+              
+              # 验证PDF文件完整性
+              if pdfinfo "pdf_output/$dir_name/$base_name.pdf" > /dev/null 2>&1; then
+                pages=$(pdfinfo "pdf_output/$dir_name/$base_name.pdf" 2>/dev/null | grep 'Pages:' | awk '{print $2}')
+                echo "  ✓ 成功: $base_name.pdf ($file_size, $pages 页)"
+                echo "转换成功: $base_name.pdf ($file_size, $pages 页)" >> "pdf_output/$dir_name/logs/${base_name}_conversion.log"
+                converted_count=$((converted_count + 1))
+              else
+                echo "  ⚠ 警告: PDF文件可能损坏: $base_name.pdf"
+                echo "PDF文件可能损坏" >> "pdf_output/$dir_name/logs/${base_name}_conversion.log"
+                # 仍算成功，因为文件已生成
+                converted_count=$((converted_count + 1))
+              fi
+            else
+              echo "  ✗ 失败: $md_file"
+              echo "转换失败: 未生成PDF文件" >> "pdf_output/$dir_name/logs/${base_name}_conversion.log"
+              
+              # 检查日志中的错误
+              if grep -i "error\|fatal\|failed" "pdf_output/$dir_name/logs/${base_name}_conversion.log"; then
+                echo "  错误详情见日志文件"
+              fi
+              
+              failed_count=$((failed_count + 1))
+            fi
+            
+            echo "" >> "pdf_output/$dir_name/logs/${base_name}_conversion.log"
+            echo "=== 转换结束 ===" >> "pdf_output/$dir_name/logs/${base_name}_conversion.log"
+          done
+          
+          echo ""
+          echo "================================"
+          echo "转换完成!"
+          echo "成功: $converted_count 个文件"
+          echo "失败: $failed_count 个文件"
+          echo "================================"
+          
+          # 如果所有文件都失败，则退出
+          if [ $converted_count -eq 0 ] && [ $failed_count -gt 0 ]; then
+            echo "错误: 没有成功转换任何文件"
+            echo "检查日志文件了解详情"
+            exit 1
+          fi
+      
+      - name: Verify and test PDF files
+        run: |
+          echo "验证生成的PDF文件..."
+          
+          total_pdfs=$(find pdf_output -name "*.pdf" -type f 2>/dev/null | wc -l)
+          
+          if [ $total_pdfs -eq 0 ]; then
+            echo "错误: 没有找到任何PDF文件"
+            exit 1
+          fi
+          
+          echo "总计生成 $total_pdfs 个PDF文件"
+          
+          # 测试PDF文件
+          echo ""
+          echo "抽样测试PDF文件..."
+          
+          # 随机选择几个PDF文件进行测试
+          find pdf_output -name "*.pdf" -type f | head -3 | while read pdf_file; do
+            echo "测试: $pdf_file"
+            
+            if pdfinfo "$pdf_file" > /dev/null 2>&1; then
+              pages=$(pdfinfo "$pdf_file" 2>/dev/null | grep 'Pages:' | awk '{print $2}')
+              size=$(du -h "$pdf_file" | cut -f1)
+              echo "  ✓ 有效PDF文件 ($size, $pages 页)"
+            else
+              echo "  ✗ 无效或损坏的PDF文件"
+            fi
+          done
+          
+          # 列出所有PDF文件
+          echo ""
+          echo "生成的PDF文件列表:"
+          find pdf_output -name "*.pdf" -type f | sort | while read pdf_file; do
+            size=$(du -h "$pdf_file" | cut -f1)
+            echo "  - $pdf_file ($size)"
+          done
+      
+      - name: Create comprehensive documentation
+        run: |
+          echo "创建综合文档..."
+          
+          # 获取 tag 名称（如果有）
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            TAG_NAME="${GITHUB_REF#refs/tags/}"
+          else
+            TAG_NAME="latest"
+          fi
+          
+          # 创建 README
+          echo "# PDF 文档集" > pdf_output/README.md
+          echo "" >> pdf_output/README.md
+          echo "## 生成信息" >> pdf_output/README.md
+          echo "- **生成时间**: $(date '+%Y-%m-%d %H:%M:%S')" >> pdf_output/README.md
+          echo "- **GitHub SHA**: ${{ github.sha }}" >> pdf_output/README.md
+          echo "- **触发事件**: ${{ github.event_name }}" >> pdf_output/README.md
+          echo "- **Git 引用**: ${{ github.ref }}" >> pdf_output/README.md
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            echo "- **标签**: $TAG_NAME" >> pdf_output/README.md
+          fi
+          echo "- **包含文件**: $(find pdf_output -name "*.pdf" -type f | wc -l) 个 PDF 文档" >> pdf_output/README.md
+          echo "" >> pdf_output/README.md
+          
+          echo "## 功能特性" >> pdf_output/README.md
+          echo "" >> pdf_output/README.md
+          echo "1. **代码块自动换行**: 支持长代码行的自动换行显示" >> pdf_output/README.md
+          echo "2. **中文支持**: 使用中文字体，支持中文内容" >> pdf_output/README.md
+          echo "3. **语法高亮**: 支持多种编程语言的语法高亮" >> pdf_output/README.md
+          echo "4. **资源文件**: 自动复制图片和资源文件" >> pdf_output/README.md
+          echo "5. **目录结构**: 保持原始目录结构" >> pdf_output/README.md
+          echo "" >> pdf_output/README.md
+          
+          echo "## 文件列表" >> pdf_output/README.md
+          echo "" >> pdf_output/README.md
+          
+          # 按目录组织文件列表
+          current_dir=""
+          find pdf_output -name "*.pdf" -type f | sort | while read pdf_file; do
+            rel_path=${pdf_file#pdf_output/}
+            dir_name=$(dirname "$rel_path")
+            file_name=$(basename "$rel_path")
+            file_size=$(du -h "$pdf_file" | cut -f1)
+            
+            # 如果是新的目录，添加标题
+            if [ "$current_dir" != "$dir_name" ]; then
+              current_dir="$dir_name"
+              if [ "$dir_name" != "." ]; then
+                echo "### $dir_name/" >> pdf_output/README.md
+                echo "" >> pdf_output/README.md
+              fi
+            fi
+            
+            echo "- [$file_name]($rel_path) ($file_size)" >> pdf_output/README.md
+          done
+          
+          # 创建发布说明（只用于 tag 发布）
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            echo "# PDF 文档发布 - $TAG_NAME" > pdf_output/RELEASE_NOTES.md
+            echo "" >> pdf_output/RELEASE_NOTES.md
+            echo "## 版本信息" >> pdf_output/RELEASE_NOTES.md
+            echo "- **发布日期**: $(date '+%Y-%m-%d %H:%M:%S')" >> pdf_output/RELEASE_NOTES.md
+            echo "- **版本**: $TAG_NAME" >> pdf_output/RELEASE_NOTES.md
+            echo "- **包含文件**: $(find pdf_output -name "*.pdf" -type f | wc -l) 个 PDF 文档" >> pdf_output/RELEASE_NOTES.md
+            echo "- **生成提交**: ${{ github.sha }}" >> pdf_output/RELEASE_NOTES.md
+            echo "" >> pdf_output/RELEASE_NOTES.md
+            
+            echo "## 文件清单" >> pdf_output/RELEASE_NOTES.md
+            echo "" >> pdf_output/RELEASE_NOTES.md
+            echo "| 文件路径 | 大小 | 页数 |" >> pdf_output/RELEASE_NOTES.md
+            echo "|----------|------|------|" >> pdf_output/RELEASE_NOTES.md
+            
+            find pdf_output -name "*.pdf" -type f | sort | while read pdf_file; do
+              rel_path=${pdf_file#pdf_output/}
+              file_size=$(du -h "$pdf_file" | cut -f1)
+              pages=$(pdfinfo "$pdf_file" 2>/dev/null | grep 'Pages:' | awk '{print $2}' || echo "N/A")
+              echo "| $rel_path | $file_size | $pages |" >> pdf_output/RELEASE_NOTES.md
+            done
+          fi
+      
+      - name: Create zip archive for release
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          echo "为 GitHub Releases 创建压缩包..."
+          
+          # 获取 tag 名称
+          TAG_NAME="${GITHUB_REF#refs/tags/}"
+          
+          # 创建压缩包
+          cd pdf_output
+          zip -r "../pdf-documents-$TAG_NAME.zip" .
+          cd ..
+          
+          echo "压缩包已创建: pdf-documents-$TAG_NAME.zip"
+          ls -lh pdf-documents-*.zip
+      
+      - name: Upload PDF artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: pdf-documents
+          path: |
+            pdf_output/
+            pdf-documents-*.zip
+          retention-days: 7
+      
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        id: create_release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: "PDF Documents - ${{ github.ref_name }}"
+          body_path: pdf_output/RELEASE_NOTES.md
+          files: |
+            pdf-documents-${{ github.ref_name }}.zip
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+      
+      - name: Verify release creation
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          echo "Release 创建完成!"
+          echo "访问: https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }}"
+          echo ""
+          echo "包含文件:"
+          echo "- pdf-documents-${{ github.ref_name }}.zip (完整文档包)"
+          echo ""
+          echo "您也可以从 Actions Artifacts 下载 PDF 文件。"
