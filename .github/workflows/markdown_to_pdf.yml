@@ -1,0 +1,123 @@
+name: Markdown to PDF Converter
+
+on:
+  push:
+    branches: ["main", "master"]
+  pull_request:
+    branches: ["main", "master"]
+  workflow_dispatch:  # 允许手动触发
+
+jobs:
+  convert-md-to-pdf:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # 获取所有历史，以便处理所有文件
+      
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pandoc texlive-xetex texlive-latex-extra texlive-fonts-recommended
+          pandoc --version
+      
+      - name: Find Markdown files
+        id: find-md
+        run: |
+          # 查找所有md文件，排除node_modules等目录
+          MD_FILES=$(find . -name "*.md" -not -path "./.*" -not -path "*/node_modules/*" | sed 's/^\.\///')
+          echo "found_md_files=${MD_FILES}" >> $GITHUB_OUTPUT
+          
+          # 创建目录结构列表
+          DIRS=$(find . -type f -name "*.md" -not -path "./.*" -not -path "*/node_modules/*" -exec dirname {} \; | sort -u | sed 's/^\.\///')
+          echo "dirs=${DIRS}" >> $GITHUB_OUTPUT
+      
+      - name: Set up output directory
+        run: |
+          mkdir -p pdf_output
+      
+      - name: Convert Markdown to PDF
+        run: |
+          IFS=$'\n'
+          for md_file in ${{ steps.find-md.outputs.found_md_files }}; do
+            # 获取文件名和目录
+            dir_name=$(dirname "$md_file")
+            base_name=$(basename "$md_file" .md)
+            
+            # 创建对应的输出目录
+            mkdir -p "pdf_output/$dir_name"
+            
+            echo "Converting: $md_file"
+            
+            # 转换PDF
+            if [ -d "$dir_name/picture" ] || [ -d "$dir_name/resource" ]; then
+              # 如果存在picture或resource目录，先复制资源
+              mkdir -p "pdf_output/$dir_name"
+              [ -d "$dir_name/picture" ] && cp -r "$dir_name/picture" "pdf_output/$dir_name/" 2>/dev/null || true
+              [ -d "$dir_name/resource" ] && cp -r "$dir_name/resource" "pdf_output/$dir_name/" 2>/dev/null || true
+            fi
+            
+            # 使用pandoc转换PDF
+            pandoc "$md_file" \
+              -o "pdf_output/$dir_name/$base_name.pdf" \
+              --pdf-engine=xelatex \
+              -V geometry:margin=1in \
+              -V colorlinks=true \
+              -V linkcolor=blue \
+              -V urlcolor=blue \
+              --highlight-style=tango \
+              -V lang=en
+              
+            # 检查是否转换成功
+            if [ -f "pdf_output/$dir_name/$base_name.pdf" ]; then
+              echo "✓ Successfully converted: $md_file -> pdf_output/$dir_name/$base_name.pdf"
+            else
+              echo "✗ Failed to convert: $md_file"
+            fi
+          done
+      
+      - name: Create conversion summary
+        run: |
+          echo "# PDF Conversion Summary" > pdf_output/SUMMARY.md
+          echo "" >> pdf_output/SUMMARY.md
+          echo "Generated on: $(date)" >> pdf_output/SUMMARY.md
+          echo "" >> pdf_output/SUMMARY.md
+          echo "## Converted Files:" >> pdf_output/SUMMARY.md
+          echo "" >> pdf_output/SUMMARY.md
+          
+          find pdf_output -name "*.pdf" | while read pdf_file; do
+            rel_path=${pdf_file#pdf_output/}
+            dir_name=$(dirname "$rel_path")
+            base_name=$(basename "$pdf_file" .pdf)
+            
+            echo "- [$base_name.pdf]($rel_path)" >> pdf_output/SUMMARY.md
+            if [ -d "pdf_output/$dir_name/picture" ]; then
+              echo "  - Contains pictures" >> pdf_output/SUMMARY.md
+            fi
+            if [ -d "pdf_output/$dir_name/resource" ]; then
+              echo "  - Contains resources" >> pdf_output/SUMMARY.md
+            fi
+          done
+      
+      - name: Upload PDF artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: pdf-documents
+          path: pdf_output/
+          retention-days: 7
+      
+      - name: Upload to GitHub Releases (optional)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: pdf_output/**
+      
+      - name: Deploy to GitHub Pages (optional)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./pdf_output
+          publish_branch: gh-pages
