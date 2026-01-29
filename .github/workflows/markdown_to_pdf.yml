@@ -40,7 +40,7 @@ jobs:
             lmodern \
             tree \
             jq \
-            poppler-utils  # 用于pdfinfo和pdftotext
+            poppler-utils
       
       - name: Find Markdown files
         id: find-md
@@ -71,7 +71,7 @@ jobs:
         run: |
           mkdir -p pdf_output
       
-      - name: Convert Markdown to PDF with inline configuration
+      - name: Convert Markdown to PDF
         run: |
           MD_FILES="${{ steps.find-md.outputs.found_md_files }}"
           
@@ -107,30 +107,30 @@ jobs:
               find "$dir_name/resource" -type f -exec cp {} "pdf_output/$dir_name/resource/" 2>/dev/null \; || true
             fi
             
-            # 方法1: 直接使用pandoc参数（最简单）
+            # 方法1: 直接使用pandoc参数
             echo "尝试方法1: 使用pandoc内置参数..."
             
             # 创建临时LaTeX片段
             TEMP_TEX=$(mktemp)
             cat > "$TEMP_TEX" << 'EOF'
-          \usepackage{listings}
-          \usepackage{xcolor}
-          \lstset{
-            basicstyle=\ttfamily\small,
-            breaklines=true,
-            breakatwhitespace=false,
-            breakautoindent=true,
-            columns=flexible,
-            keepspaces=true,
-            showstringspaces=false,
-            numbers=left,
-            numberstyle=\tiny\color{gray},
-            numbersep=5pt,
-            tabsize=2
-          }
-          \usepackage{fvextra}
-          \DefineVerbatimEnvironment{Highlighting}{Verbatim}{breaklines,commandchars=\\\{\}}
-          EOF
+              \usepackage{listings}
+              \usepackage{xcolor}
+              \lstset{
+                basicstyle=\ttfamily\small,
+                breaklines=true,
+                breakatwhitespace=false,
+                breakautoindent=true,
+                columns=flexible,
+                keepspaces=true,
+                showstringspaces=false,
+                numbers=left,
+                numberstyle=\tiny\color{gray},
+                numbersep=5pt,
+                tabsize=2
+              }
+              \usepackage{fvextra}
+              \DefineVerbatimEnvironment{Highlighting}{Verbatim}{breaklines,commandchars=\\\{\}}
+              EOF
             
             set +e
             pandoc "$md_file" \
@@ -254,50 +254,26 @@ jobs:
             exit 1
           fi
       
-      - name: Test PDF files for code wrapping
+      - name: Verify PDF files
         run: |
-          echo "测试PDF文件中的代码换行..."
+          echo "验证PDF文件..."
           
           total_pdfs=$(find pdf_output -name "*.pdf" -type f 2>/dev/null | wc -l)
           
-          if [ $total_pdfs -eq 0 ]; then
+          if [ "$total_pdfs" -eq 0 ]; then
             echo "错误: 没有找到任何PDF文件"
             exit 1
           fi
           
           echo "总计生成 $total_pdfs 个PDF文件"
           
-          # 测试前3个PDF文件
-          test_count=0
-          find pdf_output -name "*.pdf" -type f | head -3 | while read pdf_file; do
-            test_count=$((test_count + 1))
-            echo ""
-            echo "测试文件 $test_count: $pdf_file"
-            
-            # 检查PDF基本信息
-            if command -v pdfinfo &> /dev/null; then
-              pdfinfo "$pdf_file" 2>/dev/null | grep -E "Pages|Page size|File size" || true
-            fi
-            
-            # 提取一些文本查看代码块
-            if command -v pdftotext &> /dev/null; then
-              echo "提取文本片段（可能包含代码）:"
-              pdftotext "$pdf_file" - 2>/dev/null | \
-                grep -n -A2 -B2 "```\|#include\|def \|function \|class " | \
-                head -30 | sed 's/^/  /' || echo "  无法提取文本"
-            fi
-            
-            echo "代码换行状态: ✅ 已配置"
+          echo "PDF文件列表:"
+          find pdf_output -name "*.pdf" -type f | sort | while read pdf_file; do
+            size=$(du -h "$pdf_file" | cut -f1)
+            echo "  - $pdf_file ($size)"
           done
-          
-          # 如果有更多文件，只测试一部分
-          if [ $total_pdfs -gt 3 ]; then
-            echo ""
-            echo "还有 $(($total_pdfs - 3)) 个PDF文件未测试"
-            echo "所有PDF都使用相同的代码换行配置"
-          fi
       
-      - name: Create release documentation
+      - name: Create README
         run: |
           echo "创建发布文档..."
           
@@ -410,7 +386,7 @@ jobs:
             echo "## 使用说明" >> pdf_output/RELEASE_NOTES.md
             echo "" >> pdf_output/RELEASE_NOTES.md
             echo "### 下载选项" >> pdf_output/RELEASE_NOTES.md
-            echo "1. **完整包**: 下载 `pdf-documents-$TAG_NAME.zip` 获取所有PDF文件" >> pdf_output/RELEASE_NOTES.md
+            echo "1. **完整包**: 下载 \`pdf-documents-$TAG_NAME.zip\` 获取所有PDF文件" >> pdf_output/RELEASE_NOTES.md
             echo "2. **单个文件**: 从文件列表中选择需要的PDF文件" >> pdf_output/RELEASE_NOTES.md
             echo "" >> pdf_output/RELEASE_NOTES.md
             echo "### 代码块特性" >> pdf_output/RELEASE_NOTES.md
@@ -477,5 +453,3 @@ jobs:
           echo "- ✅ 无需外部配置文件，更简洁"
           echo "- ✅ 代码块自动换行，支持长代码行"
           echo "- ✅ 中文PDF支持，排版美观"
-          echo ""
-          echo "如果代码换行效果不理想，可以考虑使用方案一（listings）或方案二（minted）"
