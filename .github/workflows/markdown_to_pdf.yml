@@ -265,236 +265,24 @@ jobs:
             exit 1
           fi
       
-      - name: Create comprehensive test document
+      - name: Verify and list generated PDFs
         run: |
-          echo "创建综合测试文档..."
+          echo "验证生成的PDF文件..."
           
-          # 创建一个全面的测试PDF来验证所有功能
-          cat > comprehensive-test.md << 'EOF'
-          # 综合测试文档
+          total_pdfs=$(find pdf_output -name "*.pdf" -type f 2>/dev/null | wc -l)
           
-          本文档用于测试PDF转换的所有功能，包括中文支持、代码块、列表、表格等。
-          
-          ## 中文段落测试
-          
-          这是一个包含中文的段落。测试中文字符是否正常显示：你好，世界！这是一段中文文本，用于测试PDF转换过程中的中文支持。
-          
-          第二段中文测试：这是一个较长的中文段落，用于测试段落格式、换行和字体渲染。我们希望所有的中文字符都能正确显示，并且没有乱码问题。这里包含一些特殊字符：，。！？；：""
-          
-          ## 代码块测试
-          
-          所有代码块都应该自动换行，并且没有行号。
-          
-          ### C++ 代码（长行测试）
-          
-          ```cpp
-          #include <iostream>
-          #include <vector>
-          #include <string>
-          #include <algorithm>
-          
-          // 这是一个非常长的注释，用来测试换行功能 This is a very long comment to test line breaking functionality in code blocks
-          class MyClass {
-          public:
-              MyClass(const std::string& name, int value) : m_name(name), m_value(value) {}
-              
-              // 长函数声明测试
-              void processData(const std::vector<std::pair<int, std::string>>& dataList, bool shouldSort = true, bool verbose = false) {
-                  if (verbose) {
-                      std::cout << "Processing " << dataList.size() << " items" << std::endl;
-                  }
-                  
-                  if (shouldSort) {
-                      std::sort(dataList.begin(), dataList.end(), 
-                               [](const auto& a, const auto& b) { return a.first < b.first; });
-                  }
-                  
-                  for (const auto& item : dataList) {
-                      // 处理每个项目
-                      std::cout << "Item: " << item.first << ", " << item.second << std::endl;
-                  }
-              }
-              
-          private:
-              std::string m_name;
-              int m_value;
-              std::vector<int> m_data;
-          };
-          
-          int main() {
-              std::vector<std::pair<int, std::string>> items = {
-                  {1, "Apple"},
-                  {3, "Banana"},
-                  {2, "Cherry"},
-                  {5, "Date"},
-                  {4, "Elderberry"}
-              };
-              
-              MyClass obj("TestObject", 42);
-              obj.processData(items, true, true);
-              
-              return 0;
-          }
-          ```
-          
-          ### Python 代码（中文注释测试）
-          
-          ```python
-          # 这是一个中文注释：Python代码示例
-          def calculate_average(numbers):
-              """
-              计算数字列表的平均值
-              参数：
-                numbers: 数字列表
-              返回：
-                平均值
-              """
-              if not numbers:
-                  return 0  # 中文注释：空列表返回0
-              
-              total = sum(numbers)
-              average = total / len(numbers)
-              return average
-          
-          # 长代码行测试：这是一个非常非常长的Python函数调用，用于测试自动换行
-          result = calculate_average([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20])
-          
-          print(f"平均值: {result}")  # 中文注释：打印结果
-          ```
-          
-          ### JavaScript 代码
-          
-          ```javascript
-          // JavaScript 代码示例
-          const calculateTotal = (items, taxRate = 0.08, discount = 0) => {
-              // 中文注释：计算总价
-              const subtotal = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
-              const tax = subtotal * taxRate;
-              const discountAmount = subtotal * discount;
-              const total = subtotal + tax - discountAmount;
-              
-              return {
-                  subtotal: subtotal,
-                  tax: tax,
-                  discount: discountAmount,
-                  total: total
-              };
-          };
-          
-          // 长函数调用测试
-          const result = calculateTotal(
-              [{ name: "Item 1", price: 10.99, quantity: 2 },
-               { name: "Item 2", price: 5.49, quantity: 3 },
-               { name: "Item 3", price: 15.99, quantity: 1 }],
-              0.08,  // taxRate
-              0.1    // discount
-          );
-          
-          console.log("总计:", result.total);
-          ```
-          
-          ### Bash 命令
-          
-          ```bash
-          # 这是一个非常长的命令，用于测试换行
-          find /path/to/directory -name "*.log" -type f -size +100M -exec gzip {} \; -exec mv {}.gz /backup/logs/ \;
-          
-          # 另一个长命令
-          docker run -it --rm --name myapp -p 8080:8080 -v $(pwd):/app -e ENVIRONMENT=production -e LOG_LEVEL=DEBUG myapp:latest
-          ```
-          
-          ## 列表测试
-          
-          ### 无序列表
-          
-          - 项目一：中文测试
-          - 项目二：代码块测试
-          - 项目三：格式测试
-          - 项目四：这是一个非常长的列表项，用于测试列表项的自动换行功能是否正常工作
-          
-          ### 有序列表
-          
-          1. 第一步：准备工作
-          2. 第二步：执行转换
-          3. 第三步：验证结果
-          4. 第四步：这是一个非常长的有序列表项，用于测试有序列表的自动换行功能是否正常工作
-          
-          ## 表格测试
-          
-          | 姓名 | 年龄 | 职业 | 说明 |
-          |------|------|------|------|
-          | 张三 | 28 | 工程师 | 这是一个非常长的说明，用于测试表格单元格的自动换行功能 |
-          | 李四 | 32 | 设计师 | 设计师负责UI/UX设计 |
-          | 王五 | 45 | 经理 | 项目管理 |
-          
-          ## 链接测试
-          
-          - [GitHub](https://github.com)
-          - [Markdown指南](https://www.markdownguide.org)
-          - [Pandoc用户手册](https://pandoc.org/MANUAL.html)
-          
-          ## 图片引用测试
-          
-          ![示例图片](https://via.placeholder.com/150x100/3498db/ffffff?text=Test+Image)
-          
-          ## 引用块测试
-          
-          > 这是一个引用块，用于测试引用格式。
-          > 这是引用块的第二行，同样用于测试。
-          
-          ## 水平线测试
-          
-          ---
-          
-          ## 格式测试
-          
-          **粗体文本**、*斜体文本*、`内联代码`、~~删除线~~
-          
-          ## 特殊字符测试
-          
-          测试特殊字符：© ® ™ ° ± ≠ ≤ ≥ ≈ ∞ ∑ π √
-          
-          ## 中文字符范围测试
-          
-          测试各种中文字符：简体字、繁體字、カタカナ、ひらがな、한글
-          
-          ## 长段落测试
-          
-          这是一个非常长的段落，用于测试段落的自动换行功能。这个段落包含很多句子，每句话都有不同的内容。我们希望这些句子能够正确地在适当的位置换行，而不是超出页面边界。这是一个非常长的段落，用于测试段落的自动换行功能。这个段落包含很多句子，每句话都有不同的内容。我们希望这些句子能够正确地在适当的位置换行，而不是超出页面边界。这是一个非常长的段落，用于测试段落的自动换行功能。这个段落包含很多句子，每句话都有不同的内容。我们希望这些句子能够正确地在适当的位置换行，而不是超出页面边界。
-          
-          这是另一个段落，用于测试段落之间的间距。我们希望这个段落与上一个段落之间有适当的间距。
-          
-          ## 结束语
-          
-          如果这个测试文档的所有元素都正确显示，那么PDF转换工作正常！
-          EOF
-          
-          # 转换测试文档
-          echo "生成综合测试文档..."
-          pandoc comprehensive-test.md \
-            -o pdf_output/comprehensive-test.pdf \
-            --pdf-engine=xelatex \
-            --listings \
-            -H chinese-template.tex \
-            -V mainfont="Noto Serif CJK SC" \
-            -V sansfont="Noto Sans CJK SC" \
-            -V monofont="Noto Sans Mono CJK SC" \
-            -V geometry:margin=1in \
-            -V colorlinks=true \
-            -V linkcolor=blue \
-            -V urlcolor=blue \
-            -V lang=zh-CN \
-            --wrap=auto \
-            --toc \
-            -V toc-title="目录"
-          
-          if [ -f "pdf_output/comprehensive-test.pdf" ]; then
-            echo "✓ 综合测试文档生成成功"
-            echo "测试文档位置: pdf_output/comprehensive-test.pdf"
-            echo "请检查此文件中的所有功能是否正常"
-          else
-            echo "✗ 综合测试文档生成失败"
+          if [ $total_pdfs -eq 0 ]; then
+            echo "错误: 没有找到任何PDF文件"
+            exit 1
           fi
+          
+          echo "总计生成 $total_pdfs 个PDF文件"
+          echo ""
+          echo "PDF文件列表:"
+          find pdf_output -name "*.pdf" -type f | sort | while read pdf_file; do
+            size=$(du -h "$pdf_file" | cut -f1)
+            echo "  - $pdf_file ($size)"
+          done
       
       - name: Create release documentation
         run: |
@@ -520,7 +308,6 @@ jobs:
           fi
           echo "- **中文支持**: 已启用完整中文支持" >> pdf_output/README.md
           echo "- **代码块**: 自动换行，无行号" >> pdf_output/README.md
-          echo "- **测试文档**: 包含 comprehensive-test.pdf 验证所有功能" >> pdf_output/README.md
           echo "" >> pdf_output/README.md
           
           echo "## 文件列表" >> pdf_output/README.md
@@ -565,7 +352,6 @@ jobs:
             echo "  - 完整中文支持（已修复乱码问题）" >> pdf_output/RELEASE_NOTES.md
             echo "  - 代码块自动换行，无行号" >> pdf_output/RELEASE_NOTES.md
             echo "  - 优化段落格式和列表样式" >> pdf_output/RELEASE_NOTES.md
-            echo "  - 包含综合测试文档验证所有功能" >> pdf_output/RELEASE_NOTES.md
             echo "" >> pdf_output/RELEASE_NOTES.md
             
             echo "## 文件清单" >> pdf_output/RELEASE_NOTES.md
@@ -628,6 +414,3 @@ jobs:
           echo "主要改进:"
           echo "1. 完整中文支持（已修复乱码问题）"
           echo "2. 代码块自动换行，无行号"
-          echo "3. 包含综合测试文档验证功能"
-          echo ""
-          echo "测试文档位置: pdf_output/comprehensive-test.pdf"
