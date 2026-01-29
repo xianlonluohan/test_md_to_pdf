@@ -1,0 +1,192 @@
+name: Markdown to PDF Converter
+
+on:
+  push:
+    branches: ["main", "master"]
+  pull_request:
+    branches: ["main", "master"]
+  workflow_dispatch:  # 允许手动触发
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+jobs:
+  convert-md-to-pdf:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            pandoc \
+            texlive-xetex \
+            texlive-latex-extra \
+            texlive-fonts-recommended \
+            texlive-latex-recommended \
+            texlive-lang-chinese \
+            fonts-noto-cjk \
+            fonts-wqy-microhei \
+            fonts-wqy-zenhei \
+            lmodern \
+            tree
+      
+      - name: Find Markdown files
+        id: find-md
+        run: |
+          # 查找所有md文件，排除node_modules等目录
+          MD_FILES=$(find . -name "*.md" -not -path "./.*" -not -path "*/node_modules/*" | sed 's/^\.\///')
+          
+          # 使用heredoc格式输出
+          {
+            echo "found_md_files<<EOF"
+            echo "$MD_FILES"
+            echo "EOF"
+          } >> $GITHUB_OUTPUT
+          
+          # 创建目录结构列表
+          DIRS=$(find . -type f -name "*.md" -not -path "./.*" -not -path "*/node_modules/*" -exec dirname {} \; | sort -u | sed 's/^\.\///')
+          {
+            echo "dirs<<EOF"
+            echo "$DIRS"
+            echo "EOF"
+          } >> $GITHUB_OUTPUT
+      
+      - name: Set up output directory
+        run: |
+          mkdir -p pdf_output
+      
+      - name: Convert Markdown to PDF
+        run: |
+          MD_FILES="${{ steps.find-md.outputs.found_md_files }}"
+          
+          echo "开始转换Markdown文件到PDF..."
+          echo "找到的文件数量: $(echo "$MD_FILES" | wc -l)"
+          
+          IFS=$'\n'
+          converted_count=0
+          failed_count=0
+          
+          for md_file in $MD_FILES; do
+            [ -z "$md_file" ] && continue
+            
+            dir_name=$(dirname "$md_file")
+            base_name=$(basename "$md_file" .md)
+            
+            # 创建输出目录
+            mkdir -p "pdf_output/$dir_name"
+            
+            echo "正在转换: $md_file"
+            
+            # 获取Markdown文件所在目录
+            md_dir=$(dirname "$md_file")
+            
+            # 复制资源文件
+            if [ -d "$dir_name/picture" ]; then
+              mkdir -p "pdf_output/$dir_name/picture"
+              find "$dir_name/picture" -type f -exec cp {} "pdf_output/$dir_name/picture/" 2>/dev/null \; || true
+            fi
+            
+            if [ -d "$dir_name/resource" ]; then
+              mkdir -p "pdf_output/$dir_name/resource"
+              find "$dir_name/resource" -type f -exec cp {} "pdf_output/$dir_name/resource/" 2>/dev/null \; || true
+            fi
+            
+            # 使用pandoc转换PDF
+            set +e
+            pandoc "$md_file" \
+              --resource-path="$md_dir:.:." \
+              -o "pdf_output/$dir_name/$base_name.pdf" \
+              --pdf-engine=xelatex \
+              -V mainfont="Noto Serif CJK SC" \
+              -V geometry:margin=1in \
+              -V colorlinks=true \
+              -V linkcolor=blue \
+              -V urlcolor=blue \
+              --highlight-style=tango \
+              -V lang=zh-CN 2>&1
+            pandoc_exit=$?
+            set -e
+            
+            # 检查是否生成PDF
+            if [ -f "pdf_output/$dir_name/$base_name.pdf" ]; then
+              file_size=$(du -h "pdf_output/$dir_name/$base_name.pdf" | cut -f1)
+              echo "  ✓ 成功: $base_name.pdf ($file_size)"
+              converted_count=$((converted_count + 1))
+            else
+              echo "  ✗ 失败: $md_file"
+              failed_count=$((failed_count + 1))
+            fi
+          done
+          
+          echo ""
+          echo "================================"
+          echo "转换完成!"
+          echo "成功: $converted_count 个文件"
+          echo "失败: $failed_count 个文件"
+          echo "================================"
+          
+          # 如果所有文件都失败，则退出
+          if [ $converted_count -eq 0 ] && [ $failed_count -gt 0 ]; then
+            echo "错误: 没有成功转换任何文件"
+            exit 1
+          fi
+      
+      - name: Verify and list PDF files
+        run: |
+          echo "验证生成的PDF文件..."
+          
+          total_pdfs=$(find pdf_output -name "*.pdf" -type f 2>/dev/null | wc -l)
+          
+          if [ $total_pdfs -eq 0 ]; then
+            echo "错误: 没有找到任何PDF文件"
+            exit 1
+          fi
+          
+          echo "总计生成 $total_pdfs 个PDF文件"
+          
+          echo "生成的PDF文件:"
+          find pdf_output -name "*.pdf" -type f | sort | while read pdf_file; do
+            size=$(du -h "$pdf_file" | cut -f1)
+            echo "  - $pdf_file ($size)"
+          done
+      
+      - name: Create README
+        run: |
+          echo "# PDF 转换报告" > pdf_output/README.md
+          echo "" >> pdf_output/README.md
+          echo "生成时间: $(date '+%Y-%m-%d %H:%M:%S')" >> pdf_output/README.md
+          echo "" >> pdf_output/README.md
+          echo "## 文件列表" >> pdf_output/README.md
+          echo "" >> pdf_output/README.md
+          
+          find pdf_output -name "*.pdf" -type f | sort | while read pdf_file; do
+            rel_path=${pdf_file#pdf_output/}
+            file_size=$(du -h "$pdf_file" | cut -f1)
+            echo "- [$rel_path]($rel_path) ($file_size)" >> pdf_output/README.md
+          done
+      
+      - name: Upload PDF artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: pdf-documents
+          path: pdf_output/
+          retention-days: 7
+      
+      - name: Deploy to GitHub Pages
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./pdf_output
+          publish_branch: gh-pages
+          user_name: 'github-actions[bot]'
+          user_email: 'github-actions[bot]@users.noreply.github.com'
+          commit_message: 'Deploy PDF documents: ${{ github.sha }}'
