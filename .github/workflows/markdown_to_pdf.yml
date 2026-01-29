@@ -62,6 +62,10 @@ jobs:
             echo "$DIRS"
             echo "EOF"
           } >> $GITHUB_OUTPUT
+          
+          # 计算文件数量
+          MD_COUNT=$(echo "$MD_FILES" | wc -l)
+          echo "md_count=$MD_COUNT" >> $GITHUB_OUTPUT
       
       - name: Set up output directory
         run: |
@@ -72,7 +76,7 @@ jobs:
           MD_FILES="${{ steps.find-md.outputs.found_md_files }}"
           
           echo "开始转换Markdown文件到PDF..."
-          echo "找到的文件数量: $(echo "$MD_FILES" | wc -l)"
+          echo "找到的文件数量: ${{ steps.find-md.outputs.md_count }}"
           
           IFS=$'\n'
           converted_count=0
@@ -317,14 +321,16 @@ jobs:
           fi
           echo "- **转换方法**: 方案三（简化配置）" >> pdf_output/README.md
           echo "- **代码换行**: 已启用（使用LaTeX listings配置）" >> pdf_output/README.md
-          echo "- **转换统计**: ${{ steps.find-md.outputs.found_md_files | fromYaml | size }}个Markdown文件，生成 $(find pdf_output -name "*.pdf" -type f | wc -l)个PDF" >> pdf_output/README.md
+          
+          # 获取Markdown文件数量
+          MD_COUNT="${{ steps.find-md.outputs.md_count }}"
+          PDF_COUNT=$(find pdf_output -name "*.pdf" -type f | wc -l)
+          echo "- **转换统计**: ${MD_COUNT}个Markdown文件，生成 ${PDF_COUNT}个PDF" >> pdf_output/README.md
+          
           echo "" >> pdf_output/README.md
           
           echo "## 文件列表" >> pdf_output/README.md
           echo "" >> pdf_output/README.md
-          
-          # 统计文件数量
-          PDF_COUNT=$(find pdf_output -name "*.pdf" -type f | wc -l)
           
           # 按目录组织文件列表
           current_dir=""
