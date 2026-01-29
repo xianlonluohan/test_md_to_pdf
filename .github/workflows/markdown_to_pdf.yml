@@ -25,16 +25,29 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
+          # 安装全面的中文支持
           sudo apt-get install -y \
             pandoc \
             texlive-xetex \
             texlive-latex-extra \
             texlive-fonts-recommended \
+            texlive-lang-chinese \
+            texlive-lang-cyrillic \
+            texlive-lang-greek \
+            texlive-lang-other \
             fonts-noto-cjk \
+            fonts-noto-cjk-extra \
             fonts-wqy-microhei \
             fonts-wqy-zenhei \
+            fonts-arphic-ukai \
+            fonts-arphic-uming \
             lmodern \
             tree
+          
+          # 验证安装
+          echo "=== 已安装字体列表 ==="
+          fc-list :lang=zh
+          echo ""
           pandoc --version
       
       - name: Find Markdown files
@@ -62,7 +75,46 @@ jobs:
         run: |
           mkdir -p pdf_output
       
-      - name: Convert Markdown to PDF
+      - name: Create custom LaTeX template for Chinese support
+        run: |
+          # 创建自定义LaTeX模板来处理中文字体
+          cat > /tmp/chinese-template.tex << 'EOF'
+          \documentclass[$if(fontsize)$$fontsize$,$endif$$if(lang)$$lang$,$endif$$if(papersize)$$papersize$,$endif$]{$documentclass$}
+          \usepackage{fontspec}
+          \usepackage{xeCJK}
+          
+          % 设置中文字体
+          \setCJKmainfont{Noto Serif CJK SC}[BoldFont=Noto Serif CJK SC Bold]
+          \setCJKsansfont{Noto Sans CJK SC}[BoldFont=Noto Sans CJK SC Bold]
+          \setCJKmonofont{Noto Sans Mono CJK SC}
+          
+          % 设置英文字体
+          \setmainfont{TeX Gyre Termes}
+          \setsansfont{TeX Gyre Heros}
+          \setmonofont{TeX Gyre Cursor}
+          
+          % 其他包
+          \usepackage{hyperref}
+          \usepackage{graphicx}
+          \usepackage{geometry}
+          \geometry{$geometry$}
+          
+          \title{$title$}
+          \author{$author$}
+          \date{$date$}
+          
+          \begin{document}
+          
+          \maketitle
+          
+          $body$
+          
+          \end{document}
+          EOF
+          
+          echo "自定义LaTeX模板已创建"
+      
+      - name: Convert Markdown to PDF (with detailed logging)
         run: |
           MD_FILES="${{ steps.find-md.outputs.found_md_files }}"
           
@@ -86,53 +138,107 @@ jobs:
             
             echo "正在转换: $md_file"
             
-            # 获取Markdown文件所在目录的绝对路径
+            # 获取Markdown文件所在目录
             md_dir=$(dirname "$md_file")
             
-            # 复制资源文件到输出目录
+            # 复制资源文件
             if [ -d "$dir_name/picture" ]; then
               mkdir -p "pdf_output/$dir_name/picture"
-              cp -r "$dir_name/picture"/* "pdf_output/$dir_name/picture/" 2>/dev/null || true
+              find "$dir_name/picture" -type f -exec cp {} "pdf_output/$dir_name/picture/" 2>/dev/null \; || true
             fi
             
             if [ -d "$dir_name/resource" ]; then
               mkdir -p "pdf_output/$dir_name/resource"
-              cp -r "$dir_name/resource"/* "pdf_output/$dir_name/resource/" 2>/dev/null || true
+              find "$dir_name/resource" -type f -exec cp {} "pdf_output/$dir_name/resource/" 2>/dev/null \; || true
             fi
             
-            # 创建临时目录用于图片
+            # 创建临时目录用于处理
             temp_dir=$(mktemp -d)
             
-            # 转换PDF - 使用set +e忽略pandoc警告
+            # 方法1: 使用自定义模板
+            echo "尝试使用自定义模板转换..."
+            
+            # 创建临时文件处理图片路径
+            cp "$md_file" "$temp_dir/source.md"
+            
+            # 修复图片路径
+            sed -i 's|!\[\(.*\)\](\([^)]*\))|![\1](\2)|g' "$temp_dir/source.md"
+            
+            # 使用pandoc转换，忽略警告
             set +e
-            pandoc "$md_file" \
-              --resource-path="$md_dir:." \
+            pandoc "$temp_dir/source.md" \
+              --resource-path="$md_dir:.:$temp_dir" \
+              --template=/tmp/chinese-template.tex \
               -o "pdf_output/$dir_name/$base_name.pdf" \
               --pdf-engine=xelatex \
-              -V mainfont="Noto Sans CJK SC" \
               -V geometry:margin=1in \
               -V colorlinks=true \
               -V linkcolor=blue \
               -V urlcolor=blue \
               --highlight-style=tango \
               -V lang=zh-CN \
-              --fail-if-warning 2>&1 | tee "$temp_dir/pandoc.log"
+              --variable mainfont="Noto Serif CJK SC" \
+              --variable sansfont="Noto Sans CJK SC" \
+              --variable monofont="Noto Sans Mono CJK SC" \
+              --variable CJKmainfont="Noto Serif CJK SC" \
+              --variable documentclass=article \
+              --verbose 2>&1 | tee "$temp_dir/pandoc.log"
             
             pandoc_exit=$?
             set -e
             
-            # 清理临时目录
-            rm -rf "$temp_dir"
-            
-            # 检查PDF是否生成（不检查pandoc退出码，因为警告也会导致非0退出码）
+            # 检查是否生成PDF
             if [ -f "pdf_output/$dir_name/$base_name.pdf" ]; then
-              echo "✓ 成功转换: $md_file -> pdf_output/$dir_name/$base_name.pdf"
+              file_size=$(du -h "pdf_output/$dir_name/$base_name.pdf" | cut -f1)
+              echo "✓ 成功转换: $md_file -> pdf_output/$dir_name/$base_name.pdf ($file_size)"
               ((converted_count++))
             else
-              echo "✗ 转换失败: $md_file"
-              echo "Pandoc退出码: $pandoc_exit"
-              ((failed_count++))
+              # 方法2: 尝试使用简单的方法，忽略所有警告
+              echo "自定义模板失败，尝试简单方法..."
+              
+              # 使用更简单的命令，忽略警告
+              pandoc "$md_file" \
+                --resource-path="$md_dir:.:$temp_dir" \
+                -o "pdf_output/$dir_name/$base_name.pdf" \
+                --pdf-engine=xelatex \
+                -V mainfont="WenQuanYi Micro Hei" \
+                -V geometry:margin=1in \
+                -V colorlinks=true \
+                -V linkcolor=blue \
+                -V urlcolor=blue \
+                --highlight-style=tango \
+                --fail-on-warning=false \
+                --quiet 2>&1 || true
+              
+              if [ -f "pdf_output/$dir_name/$base_name.pdf" ]; then
+                file_size=$(du -h "pdf_output/$dir_name/$base_name.pdf" | cut -f1)
+                echo "✓ 简单方法成功: $md_file -> pdf_output/$dir_name/$base_name.pdf ($file_size)"
+                ((converted_count++))
+              else
+                echo "✗ 所有方法都失败: $md_file"
+                echo "最后尝试使用最基本的方法..."
+                
+                # 方法3: 使用最基本的方法
+                pandoc "$md_file" \
+                  -o "pdf_output/$dir_name/$base_name.pdf" \
+                  --pdf-engine=xelatex \
+                  -V mainfont="SimSun" \
+                  --fail-on-warning=false \
+                  2>&1 | grep -v "Warning:" || true
+                
+                if [ -f "pdf_output/$dir_name/$base_name.pdf" ]; then
+                  file_size=$(du -h "pdf_output/$dir_name/$base_name.pdf" | cut -f1)
+                  echo "✓ 基本方法成功: $md_file -> pdf_output/$dir_name/$base_name.pdf ($file_size)"
+                  ((converted_count++))
+                else
+                  echo "✗ 转换失败: $md_file"
+                  ((failed_count++))
+                fi
+              fi
             fi
+            
+            # 清理临时目录
+            rm -rf "$temp_dir"
           done
           
           echo ""
@@ -148,55 +254,53 @@ jobs:
             exit 1
           fi
       
+      - name: Verify and count PDF files
+        run: |
+          echo "验证生成的PDF文件..."
+          
+          total_pdfs=$(find pdf_output -name "*.pdf" -type f | wc -l)
+          total_size=$(du -sh pdf_output | cut -f1)
+          
+          if [ $total_pdfs -eq 0 ]; then
+            echo "警告: 没有找到任何PDF文件"
+            exit 1
+          fi
+          
+          echo "总计生成 $total_pdfs 个PDF文件，总大小: $total_size"
+          
+          # 列出前10个文件
+          echo "前10个PDF文件:"
+          find pdf_output -name "*.pdf" -type f | head -10 | while read file; do
+            size=$(du -h "$file" | cut -f1)
+            echo "  - $file ($size)"
+          done
+      
       - name: Create conversion summary
         run: |
-          echo "# PDF Conversion Summary" > pdf_output/SUMMARY.md
-          echo "" >> pdf_output/SUMMARY.md
-          echo "Generated on: $(date)" >> pdf_output/SUMMARY.md
-          echo "" >> pdf_output/SUMMARY.md
-          echo "## Converted Files:" >> pdf_output/SUMMARY.md
-          echo "" >> pdf_output/SUMMARY.md
+          echo "# PDF 转换报告" > pdf_output/README.md
+          echo "" >> pdf_output/README.md
+          echo "生成时间: $(date '+%Y-%m-%d %H:%M:%S')" >> pdf_output/README.md
+          echo "" >> pdf_output/README.md
+          echo "## 已转换的文件" >> pdf_output/README.md
+          echo "" >> pdf_output/README.md
           
-          pdf_count=0
           find pdf_output -name "*.pdf" -type f | sort | while read pdf_file; do
-            ((pdf_count++))
             rel_path=${pdf_file#pdf_output/}
             dir_name=$(dirname "$rel_path")
             base_name=$(basename "$pdf_file" .pdf)
             file_size=$(du -h "$pdf_file" | cut -f1)
             
-            echo "- [$base_name.pdf]($rel_path) ($file_size)" >> pdf_output/SUMMARY.md
+            echo "- **$base_name**" >> pdf_output/README.md
+            echo "  - 路径: [$rel_path]($rel_path)" >> pdf_output/README.md
+            echo "  - 大小: $file_size" >> pdf_output/README.md
+            
+            # 检查是否有图片
             if [ -d "pdf_output/$dir_name/picture" ]; then
               pic_count=$(find "pdf_output/$dir_name/picture" -type f 2>/dev/null | wc -l)
-              echo "  - Contains $pic_count pictures" >> pdf_output/SUMMARY.md
+              echo "  - 包含 $pic_count 张图片" >> pdf_output/README.md
             fi
-            if [ -d "pdf_output/$dir_name/resource" ]; then
-              res_count=$(find "pdf_output/$dir_name/resource" -type f 2>/dev/null | wc -l)
-              echo "  - Contains $res_count resources" >> pdf_output/SUMMARY.md
-            fi
+            echo "" >> pdf_output/README.md
           done
-          
-          echo "" >> pdf_output/SUMMARY.md
-          echo "## Statistics" >> pdf_output/SUMMARY.md
-          echo "- Total PDF files: $pdf_count" >> pdf_output/SUMMARY.md
-          echo "- Total size: $(du -sh pdf_output | cut -f1)" >> pdf_output/SUMMARY.md
-      
-      - name: Verify PDF generation
-        run: |
-          echo "检查生成的PDF文件..."
-          find pdf_output -name "*.pdf" -type f | while read pdf_file; do
-            size=$(du -h "$pdf_file" | cut -f1)
-            echo "✓ $pdf_file ($size)"
-          done
-          
-          total_pdfs=$(find pdf_output -name "*.pdf" -type f | wc -l)
-          echo ""
-          echo "总计生成 $total_pdfs 个PDF文件"
-          
-          if [ $total_pdfs -eq 0 ]; then
-            echo "错误: 没有生成PDF文件"
-            exit 1
-          fi
       
       - name: Upload PDF artifacts
         uses: actions/upload-artifact@v4
@@ -204,12 +308,6 @@ jobs:
           name: pdf-documents
           path: pdf_output/
           retention-days: 7
-      
-      - name: Upload to GitHub Releases (optional)
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v1
-        with:
-          files: pdf_output/**
       
       - name: Deploy to GitHub Pages
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -221,3 +319,4 @@ jobs:
           user_name: 'github-actions[bot]'
           user_email: 'github-actions[bot]@users.noreply.github.com'
           commit_message: 'Deploy PDF documents: ${{ github.sha }}'
+          keep_files: false
