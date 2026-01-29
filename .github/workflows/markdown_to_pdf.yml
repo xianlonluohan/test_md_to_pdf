@@ -7,6 +7,12 @@ on:
     branches: ["main", "master"]
   workflow_dispatch:  # 允许手动触发
 
+# 添加工作流级别的权限配置
+permissions:
+  contents: write  # 允许写入内容到仓库
+  pages: write    # 允许部署到GitHub Pages
+  id-token: write # 允许使用OIDC令牌
+
 jobs:
   convert-md-to-pdf:
     runs-on: ubuntu-latest
@@ -28,23 +34,41 @@ jobs:
         run: |
           # 查找所有md文件，排除node_modules等目录
           MD_FILES=$(find . -name "*.md" -not -path "./.*" -not -path "*/node_modules/*" | sed 's/^\.\///')
-          # 使用base64编码避免特殊字符问题
-          echo "found_md_files=$(echo "$MD_FILES" | base64 -w 0)" >> $GITHUB_OUTPUT
+          
+          # 使用heredoc格式输出，避免特殊字符问题
+          {
+            echo "found_md_files<<EOF"
+            echo "$MD_FILES"
+            echo "EOF"
+          } >> $GITHUB_OUTPUT
           
           # 创建目录结构列表
           DIRS=$(find . -type f -name "*.md" -not -path "./.*" -not -path "*/node_modules/*" -exec dirname {} \; | sort -u | sed 's/^\.\///')
-          echo "dirs=$(echo "$DIRS" | base64 -w 0)" >> $GITHUB_OUTPUT
+          {
+            echo "dirs<<EOF"
+            echo "$DIRS"
+            echo "EOF"
+          } >> $GITHUB_OUTPUT
       
       - name: Set up output directory
         run: |
           mkdir -p pdf_output
       
-      - name: Decode and convert Markdown to PDF
+      - name: Convert Markdown to PDF
         run: |
-          # 解码base64编码的文件列表
-          MD_FILES=$(echo "${{ steps.find-md.outputs.found_md_files }}" | base64 -d)
+          # 注意：使用heredoc格式时，输出变量已经是原始文本，无需解码
+          # 但由于安全考虑，我们将输出存储到变量中
+          MD_FILES="${{ steps.find-md.outputs.found_md_files }}"
+          
+          # 记录开始时间
+          echo "开始转换Markdown文件到PDF..."
+          echo "找到的文件列表:"
+          echo "$MD_FILES"
           
           IFS=$'\n'
+          converted_count=0
+          failed_count=0
+          
           for md_file in $MD_FILES; do
             # 跳过空行
             [ -z "$md_file" ] && continue
@@ -56,7 +80,7 @@ jobs:
             # 创建对应的输出目录
             mkdir -p "pdf_output/$dir_name"
             
-            echo "Converting: $md_file"
+            echo "正在转换: $md_file"
             
             # 转换PDF
             if [ -d "$dir_name/picture" ] || [ -d "$dir_name/resource" ]; then
@@ -67,7 +91,7 @@ jobs:
             fi
             
             # 使用pandoc转换PDF
-            pandoc "$md_file" \
+            if pandoc "$md_file" \
               -o "pdf_output/$dir_name/$base_name.pdf" \
               --pdf-engine=xelatex \
               -V geometry:margin=1in \
@@ -75,15 +99,29 @@ jobs:
               -V linkcolor=blue \
               -V urlcolor=blue \
               --highlight-style=tango \
-              -V lang=en
+              -V lang=en 2>&1; then
               
-            # 检查是否转换成功
-            if [ -f "pdf_output/$dir_name/$base_name.pdf" ]; then
-              echo "✓ Successfully converted: $md_file -> pdf_output/$dir_name/$base_name.pdf"
+              # 检查是否转换成功
+              if [ -f "pdf_output/$dir_name/$base_name.pdf" ]; then
+                echo "✓ 成功转换: $md_file -> pdf_output/$dir_name/$base_name.pdf"
+                ((converted_count++))
+              else
+                echo "✗ 文件创建失败: $md_file"
+                ((failed_count++))
+              fi
             else
-              echo "✗ Failed to convert: $md_file"
+              echo "✗ pandoc转换失败: $md_file"
+              ((failed_count++))
             fi
           done
+          
+          # 输出统计信息
+          echo ""
+          echo "================================"
+          echo "转换完成!"
+          echo "成功: $converted_count 个文件"
+          echo "失败: $failed_count 个文件"
+          echo "================================"
       
       - name: Create conversion summary
         run: |
@@ -94,7 +132,10 @@ jobs:
           echo "## Converted Files:" >> pdf_output/SUMMARY.md
           echo "" >> pdf_output/SUMMARY.md
           
+          # 统计转换的PDF文件
+          pdf_count=0
           find pdf_output -name "*.pdf" | while read pdf_file; do
+            ((pdf_count++))
             rel_path=${pdf_file#pdf_output/}
             dir_name=$(dirname "$rel_path")
             base_name=$(basename "$pdf_file" .pdf)
@@ -107,6 +148,32 @@ jobs:
               echo "  - Contains resources" >> pdf_output/SUMMARY.md
             fi
           done
+          
+          echo "" >> pdf_output/SUMMARY.md
+          echo "## Statistics" >> pdf_output/SUMMARY.md
+          echo "- Total PDF files: $pdf_count" >> pdf_output/SUMMARY.md
+          
+          # 生成索引文件
+          echo "# PDF 文件索引" > pdf_output/README.md
+          echo "" >> pdf_output/README.md
+          echo "此目录包含自动生成的PDF文件，由GitHub Actions工作流从Markdown文件转换而来。" >> pdf_output/README.md
+          echo "" >> pdf_output/README.md
+          echo "## 如何下载" >> pdf_output/README.md
+          echo "1. 在工作流的Artifacts部分找到 'pdf-documents'" >> pdf_output/README.md
+          echo "2. 点击下载整个压缩包" >> pdf_output/README.md
+          echo "3. 解压后查看所有PDF文件" >> pdf_output/README.md
+      
+      - name: List generated PDFs
+        run: |
+          echo "生成的PDF文件列表:"
+          find pdf_output -name "*.pdf" -type f | while read file; do
+            size=$(du -h "$file" | cut -f1)
+            echo "  - $file ($size)"
+          done
+          
+          echo ""
+          echo "目录结构:"
+          tree pdf_output || ls -la pdf_output/
       
       - name: Upload PDF artifacts
         uses: actions/upload-artifact@v4
@@ -121,10 +188,14 @@ jobs:
         with:
           files: pdf_output/**
       
-      - name: Deploy to GitHub Pages (optional)
+      - name: Deploy to GitHub Pages
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: peaceiris/actions-gh-pages@v3
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./pdf_output
           publish_branch: gh-pages
+          # 可选配置
+          user_name: 'github-actions[bot]'
+          user_email: 'github-actions[bot]@users.noreply.github.com'
+          commit_message: 'Deploy PDF documents: ${{ github.sha }}'
