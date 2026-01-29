@@ -28,20 +28,27 @@ jobs:
         run: |
           # 查找所有md文件，排除node_modules等目录
           MD_FILES=$(find . -name "*.md" -not -path "./.*" -not -path "*/node_modules/*" | sed 's/^\.\///')
-          echo "found_md_files=${MD_FILES}" >> $GITHUB_OUTPUT
+          # 使用base64编码避免特殊字符问题
+          echo "found_md_files=$(echo "$MD_FILES" | base64 -w 0)" >> $GITHUB_OUTPUT
           
           # 创建目录结构列表
           DIRS=$(find . -type f -name "*.md" -not -path "./.*" -not -path "*/node_modules/*" -exec dirname {} \; | sort -u | sed 's/^\.\///')
-          echo "dirs=${DIRS}" >> $GITHUB_OUTPUT
+          echo "dirs=$(echo "$DIRS" | base64 -w 0)" >> $GITHUB_OUTPUT
       
       - name: Set up output directory
         run: |
           mkdir -p pdf_output
       
-      - name: Convert Markdown to PDF
+      - name: Decode and convert Markdown to PDF
         run: |
+          # 解码base64编码的文件列表
+          MD_FILES=$(echo "${{ steps.find-md.outputs.found_md_files }}" | base64 -d)
+          
           IFS=$'\n'
-          for md_file in ${{ steps.find-md.outputs.found_md_files }}; do
+          for md_file in $MD_FILES; do
+            # 跳过空行
+            [ -z "$md_file" ] && continue
+            
             # 获取文件名和目录
             dir_name=$(dirname "$md_file")
             base_name=$(basename "$md_file" .md)
