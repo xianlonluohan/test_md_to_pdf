@@ -36,21 +36,40 @@ jobs:
             fonts-noto-cjk \
             fonts-wqy-microhei \
             fonts-wqy-zenhei \
+            fonts-arphic-uming \
             lmodern \
             tree \
             jq
       
       - name: "Create LaTeX template"
         run: |
-          # 创建只包含包的模板，不包含 \documentclass
+          # 创建改进的模板，包含防止代码超出的设置
           cat > header.tex << 'EOF'
+          % 中文支持 - 使用更全面的字体设置
           \usepackage{xeCJK}
-          \setCJKmainfont{Noto Serif CJK SC}
-          \setCJKsansfont{Noto Sans CJK SC}
-          \setCJKmonofont{Noto Sans Mono CJK SC}
+          \usepackage[UTF8]{ctex}
           
-          % 页面设置
-          \usepackage[margin=1in]{geometry}
+          % 设置中文字体，优先使用系统字体
+          \setCJKmainfont[
+            Path = /usr/share/fonts/truetype/noto/,
+            Extension = .ttf,
+            BoldFont = NotoSerifCJKsc-Bold,
+            ItalicFont = NotoSerifCJKsc-Light
+          ]{NotoSerifCJKsc-Regular}
+          
+          \setCJKsansfont[
+            Path = /usr/share/fonts/truetype/noto/,
+            Extension = .ttf,
+            BoldFont = NotoSansCJKsc-Bold
+          ]{NotoSansCJKsc-Regular}
+          
+          \setCJKmonofont[
+            Path = /usr/share/fonts/truetype/noto/,
+            Extension = .ttf
+          ]{NotoSansMonoCJKsc-Regular}
+          
+          % 页面设置 - 增加边距
+          \usepackage[margin=1.2in]{geometry}
           
           % 超链接
           \usepackage{hyperref}
@@ -59,36 +78,61 @@ jobs:
             linkcolor=blue,
             urlcolor=blue,
             citecolor=blue,
+            pdfborder={0 0 0},
           }
           
-          % 代码块设置 - 使用 listings
+          % 代码块设置 - 使用改进的 listings
           \usepackage{listings}
           \usepackage{xcolor}
           
-          \definecolor{codebg}{rgb}{0.95,0.95,0.95}
-          \definecolor{framecolor}{rgb}{0.7,0.7,0.7}
+          % 定义颜色
+          \definecolor{codebg}{rgb}{0.98,0.98,0.98}
+          \definecolor{framecolor}{rgb}{0.8,0.8,0.8}
           
+          % 改进的代码块设置
           \lstset{
-            basicstyle=\ttfamily\small,
+            basicstyle=\ttfamily\footnotesize,
             backgroundcolor=\color{codebg},
             frame=single,
-            framesep=5pt,
-            framerule=0.5pt,
+            framesep=6pt,
+            framerule=0.8pt,
             rulecolor=\color{framecolor},
             breaklines=true,
-            breakatwhitespace=false,
+            breakatwhitespace=false,  % 允许在任何字符处换行
             breakautoindent=true,
+            breakindent=0pt,
+            postbreak=\raisebox{0ex}[0ex][0ex]{\ensuremath{\color{red}\hookrightarrow\space}},
             showstringspaces=false,
             tabsize=2,
             numbers=none,
-            xleftmargin=10pt,
-            xrightmargin=10pt,
+            xleftmargin=12pt,
+            xrightmargin=12pt,
+            escapeinside={\%*}{*)},  % 允许在代码中插入LaTeX
+            upquote=true,  % 正确处理引号
+            columns=fullflexible,  % 更好的字符间距
+            keepspaces=true,  % 保持空格
+            literate=  % 处理特殊字符
+              {=}{{\texttt{=}}}1
+              {-}{{\texttt{-}}}1
+              {+}{{\texttt{+}}}1
           }
+          
+          % 处理过长的等号和连字符
+          \usepackage{seqsplit}
           
           % 段落设置
           \usepackage{parskip}
           \setlength{\parindent}{0pt}
-          \setlength{\parskip}{0.5em}
+          \setlength{\parskip}{0.8em}
+          
+          % 防止溢出
+          \sloppy
+          \emergencystretch=3em
+          
+          % 改进的代码环境
+          \lstnewenvironment{codeblock}[1][]
+            {\lstset{#1}}
+            {}
           EOF
       
       - name: "Set up output directory"
@@ -123,23 +167,21 @@ jobs:
             # 获取Markdown文件所在目录
             md_dir=$(dirname "$md_file")
             
-            # 复制图片文件夹
+            # 复制资源文件
             if [ -d "$dir_name/picture" ]; then
               mkdir -p "pdf_output/$dir_name/picture"
               find "$dir_name/picture" -type f \( -name "*.png" -o -name "*.jpg" -o -name "*.jpeg" \) -exec cp {} "pdf_output/$dir_name/picture/" 2>/dev/null \; || true
             fi
             
-            # 复制资源文件夹
             if [ -d "$dir_name/resource" ]; then
               mkdir -p "pdf_output/$dir_name/resource"
               find "$dir_name/resource" -type f -exec cp {} "pdf_output/$dir_name/resource/" 2>/dev/null \; || true
             fi
             
-            # 尝试转换
+            # 转换Markdown为PDF
             set +e
             
-            # 使用最简单的 pandoc 命令
-            # 使用 -H 而不是 -H 包含 header.tex，这样不会重复 \documentclass
+            # 方法1：使用listings，带边框和自动换行
             pandoc "$md_file" \
               --resource-path="$md_dir:.:." \
               -o "pdf_output/$dir_name/$base_name.pdf" \
@@ -147,13 +189,17 @@ jobs:
               --listings \
               --include-in-header=header.tex \
               -V mainfont="Noto Serif CJK SC" \
+              -V sansfont="Noto Sans CJK SC" \
               -V monofont="Noto Sans Mono CJK SC" \
-              -V geometry:margin=1in \
+              -V geometry:margin=1.2in \
+              -V geometry:a4paper \
               -V colorlinks=true \
               -V linkcolor=blue \
               -V urlcolor=blue \
               -V lang=zh-CN \
-              --wrap=preserve \
+              -V papersize=a4 \
+              --wrap=auto \
+              --highlight-style=tango \
               2>&1 | tee pandoc.log
             
             set -e
@@ -260,8 +306,10 @@ jobs:
           if [[ "${{ github.ref }}" == refs/tags/* ]]; then
             echo "- **标签**: $TAG_NAME" >> pdf_output/README.md
           fi
-          echo "- **代码块样式**: 使用带边框的代码框" >> pdf_output/README.md
-          echo "- **页面边距**: 1英寸边距" >> pdf_output/README.md
+          echo "- **代码块样式**: 使用带边框的代码框，自动换行" >> pdf_output/README.md
+          echo "- **页面边距**: 1.2英寸边距，防止内容溢出" >> pdf_output/README.md
+          echo "- **中文字体**: 使用Noto CJK字体，优化中文显示" >> pdf_output/README.md
+          echo "- **改进功能**: 修复长行代码超出边界的问题" >> pdf_output/README.md
           echo "" >> pdf_output/README.md
           
           echo "## 文件列表" >> pdf_output/README.md
