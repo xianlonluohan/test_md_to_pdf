@@ -55,7 +55,6 @@ jobs:
               """将HTML标签转换为Markdown格式，保持图片顺序"""
               
               # 首先处理图片和对应的center标签
-              # 我们匹配 <center>...<img ...>...</center> 这样的结构
               center_img_pattern = re.compile(
                   r'<center>\s*(.*?<img\s+[^>]+>.*?)\s*</center>',
                   re.IGNORECASE | re.DOTALL
@@ -280,19 +279,16 @@ jobs:
           \def\maxwidth{\ifdim\Gin@nat@width>\linewidth\linewidth\else\Gin@nat@width\fi}
           \makeatother
           
-          % 重新定义图片环境，确保图片位置固定
+          % 重新定义图片环境，确保图片位置固定，不自动生成标签
           \let\oldincludegraphics\includegraphics
           \renewcommand{\includegraphics}[2][]{%
             \begin{figure}[H]
               \centering
               \oldincludegraphics[#1,width=\maxwidth,keepaspectratio]{#2}
-              \ifx\@empty#1\else
-                \caption{#1}
-              \fi
             \end{figure}%
           }
           
-          % 处理markdown中的图片引用
+          % 处理markdown中的图片引用，不自动生成标签
           \usepackage{xparse}
           \NewDocumentCommand{\mdimage}{m o}{%
             \begin{figure}[H]
@@ -318,6 +314,41 @@ jobs:
               \centering
             }%
           }
+          
+          % 关闭章节标题在页眉的显示
+          \usepackage{fancyhdr}
+          \pagestyle{fancy}
+          \fancyhf{} % 清空所有页眉页脚
+          \fancyhead[L]{}
+          \fancyhead[C]{}
+          \fancyhead[R]{}
+          \fancyfoot[C]{\thepage} % 只在页脚居中显示页码
+          \renewcommand{\headrulewidth}{0pt} % 去掉页眉横线
+          \renewcommand{\footrulewidth}{0pt} % 去掉页脚横线
+          
+          % 防止章节标题在页眉重复出现
+          \renewcommand{\chaptermark}[1]{}
+          \renewcommand{\sectionmark}[1]{}
+          
+          % 设置标题格式
+          \usepackage{titlesec}
+          \titleformat{\chapter}[display]
+            {\normalfont\huge\bfseries\centering}
+            {\chaptertitlename\ \thechapter}
+            {20pt}
+            {\Huge}
+          
+          \titleformat{\section}
+            {\normalfont\Large\bfseries}
+            {\thesection}
+            {1em}
+            {}
+          
+          \titleformat{\subsection}
+            {\normalfont\large\bfseries}
+            {\thesubsection}
+            {1em}
+            {}
           EOF
       
       - name: "Set up output directory"
@@ -387,6 +418,7 @@ jobs:
               -M graphics:true \
               -M placeins:true \
               -M floatplacement:"figure:H" \
+              -M caption-justification=centered \
               2>&1 | tee conversion.log
               
             conversion_status=$?
@@ -471,6 +503,7 @@ jobs:
           echo "代码块带边框，自动换行" >> pdf_output/README.md
           echo "添加平铺式 'emakefun' 水印" >> pdf_output/README.md
           echo "包含resource目录中的程序文件" >> pdf_output/README.md
+          echo "优化：去除了页眉章节标题重复，修复了图片标签重复问题" >> pdf_output/README.md
           echo "" >> pdf_output/README.md
           
           echo "## 文件列表" >> pdf_output/README.md
