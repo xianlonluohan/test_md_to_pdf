@@ -44,7 +44,7 @@ jobs:
           
           pip3 install beautifulsoup4
       
-      - name: "Create HTML to Markdown converter"
+      - name: "Create improved HTML to Markdown converter"
         run: |
           cat > convert_html.py << 'EOF'
           import os
@@ -52,28 +52,61 @@ jobs:
           import sys
           
           def convert_html_to_markdown(content, file_path):
-              """将HTML标签转换为Markdown格式"""
+              """将HTML标签转换为Markdown格式，保持图片顺序"""
               
-              # 处理图片标签
+              # 首先处理图片和对应的center标签
+              # 我们匹配 <center>...<img ...>...</center> 这样的结构
+              center_img_pattern = re.compile(
+                  r'<center>\s*(.*?<img\s+[^>]+>.*?)\s*</center>',
+                  re.IGNORECASE | re.DOTALL
+              )
+              
+              def replace_center_img(match):
+                  inner_content = match.group(1).strip()
+                  
+                  # 提取img标签
+                  img_match = re.search(r'<img\s+([^>]+)>', inner_content)
+                  if img_match:
+                      attrs_str = img_match.group(1)
+                      
+                      # 提取属性
+                      src_match = re.search(r'src\s*=\s*["\']([^"\']+)["\']', attrs_str)
+                      alt_match = re.search(r'alt\s*=\s*["\']([^"\']*)["\']', attrs_str)
+                      
+                      src = src_match.group(1) if src_match else ''
+                      alt = alt_match.group(1) if alt_match else ''
+                      
+                      # 清理src路径
+                      if src:
+                          src = re.sub(r'^\./', '', src)
+                          src = re.sub(r'^/', '', src)
+                      
+                      # 返回Markdown图片格式，并添加换行确保正确显示
+                      return f'\n\n![{alt}]({src})\n\n'
+                  
+                  return inner_content
+              
+              content = center_img_pattern.sub(replace_center_img, content)
+              
+              # 单独处理剩余的img标签（不在center中的）
               img_pattern = re.compile(r'<img\s+([^>]+)>', re.IGNORECASE)
               
               def replace_img_tag(match):
                   attrs_str = match.group(1)
                   
-                  # 提取属性
                   src_match = re.search(r'src\s*=\s*["\']([^"\']+)["\']', attrs_str)
                   alt_match = re.search(r'alt\s*=\s*["\']([^"\']*)["\']', attrs_str)
                   
                   src = src_match.group(1) if src_match else ''
                   alt = alt_match.group(1) if alt_match else ''
                   
-                  # 清理src路径 - 移除开头的./或/
+                  # 清理src路径
                   if src:
                       src = re.sub(r'^\./', '', src)
                       src = re.sub(r'^/', '', src)
                   
-                  # 返回Markdown图片格式
-                  return f'![{alt}]({src})'
+                  # 返回Markdown图片格式，添加换行
+                  return f'\n\n![{alt}]({src})\n\n'
               
               content = img_pattern.sub(replace_img_tag, content)
               
@@ -89,14 +122,14 @@ jobs:
                       href = href_match.group(1)
                       return f'[{link_text}]({href})'
                   return link_text
-              
+            
               content = link_pattern.sub(replace_link_tag, content)
               
-              # 处理center标签 - 移除即可
-              content = re.sub(r'<center>(.*?)</center>', r'\1', content, flags=re.DOTALL | re.IGNORECASE)
-              
-              # 移除所有其他HTML标签，保留内容
+              # 移除剩余的HTML标签，保留内容
               content = re.sub(r'<[^>]+>', '', content)
+              
+              # 清理多余的空白行
+              content = re.sub(r'\n\s*\n\s*\n', '\n\n', content)
               
               return content
           
@@ -116,6 +149,8 @@ jobs:
                   return True
               except Exception as e:
                   print(f"处理失败 {filepath}: {e}")
+                  import traceback
+                  traceback.print_exc()
                   return False
           
           # 遍历所有Markdown文件
@@ -136,7 +171,7 @@ jobs:
           
           python3 convert_html.py
       
-      - name: "Create LaTeX template"
+      - name: "Create LaTeX template with better image handling"
         run: |
           cat > header.tex << 'EOF'
           \usepackage{xeCJK}
@@ -160,6 +195,8 @@ jobs:
           \usepackage{xcolor}
           \usepackage{graphicx}
           \usepackage{float}
+          \usepackage{caption}
+          \usepackage[section]{placeins}
           
           \definecolor{codebg}{rgb}{0.98,0.98,0.98}
           \definecolor{framecolor}{rgb}{0.8,0.8,0.8}
@@ -235,7 +272,7 @@ jobs:
           
           \AddToShipoutPictureBG{\BackgroundPicture}
           
-          % 图片处理设置
+          % 图片处理设置 - 确保图片位置正确
           \graphicspath{{./}{./picture/}{./resource/}}
           
           % 设置图片最大宽度为行宽
@@ -243,9 +280,43 @@ jobs:
           \def\maxwidth{\ifdim\Gin@nat@width>\linewidth\linewidth\else\Gin@nat@width\fi}
           \makeatother
           
+          % 重新定义图片环境，确保图片位置固定
           \let\oldincludegraphics\includegraphics
           \renewcommand{\includegraphics}[2][]{%
-            \oldincludegraphics[#1,width=\maxwidth]{#2}%
+            \begin{figure}[H]
+              \centering
+              \oldincludegraphics[#1,width=\maxwidth,keepaspectratio]{#2}
+              \ifx\@empty#1\else
+                \caption{#1}
+              \fi
+            \end{figure}%
+          }
+          
+          % 处理markdown中的图片引用
+          \usepackage{xparse}
+          \NewDocumentCommand{\mdimage}{m o}{%
+            \begin{figure}[H]
+              \centering
+              \IfValueTF{#2}{%
+                \includegraphics[width=#2\linewidth]{#1}%
+              }{%
+                \includegraphics[width=0.8\linewidth]{#1}%
+              }
+            \end{figure}%
+          }
+          
+          % 防止图片浮动到错误位置
+          \usepackage{float}
+          \floatplacement{figure}{H}
+          
+          % 确保图片按顺序出现
+          \usepackage{placeins}
+          \AtBeginDocument{%
+            \let\oldfigure\figure
+            \renewcommand{\figure}[1][H]{%
+              \oldfigure[#1]%
+              \centering
+            }%
           }
           EOF
       
@@ -253,7 +324,7 @@ jobs:
         run: |
           mkdir -p pdf_output
       
-      - name: "Convert Markdown to PDF"
+      - name: "Convert Markdown to PDF with improved image placement"
         run: |
           MD_FILES=$(find . -name "*.md" -not -path "./.*" -not -path "*/node_modules/*" -not -path "./pdf_output/*" | sed 's/^\.\///')
           
@@ -278,26 +349,23 @@ jobs:
             md_dir=$(dirname "$md_file")
             
             # 构建资源路径 - 包含多个可能的位置
-            # 注意：我们首先尝试markdown文件所在目录，然后是其下的picture目录
-            # 然后是项目根目录的picture和resource目录
             resource_paths="$md_dir:$md_dir/picture:$md_dir/../picture:.:./picture:./resource"
             
             echo "资源路径: $resource_paths"
             
-            # 检查markdown文件中提到的图片
-            echo "检查图片引用..."
+            # 预览处理后的markdown文件中的图片部分
+            echo "预览markdown中的图片引用:"
             if [ -f "$md_file" ]; then
-              grep -o '!\[.*\](.*)' "$md_file" | head -5 | while read img; do
-                echo "  找到图片引用: $img"
+              grep -n '!\[.*\](.*)' "$md_file" | head -10 | while read line; do
+                echo "  $line"
               done || true
             fi
             
             set +e
             
-            # 转换PDF - 使用简单的设置，不压缩
+            # 转换PDF - 使用更严格的设置确保图片位置
             echo "开始转换PDF..."
             
-            # 先尝试直接转换
             pandoc "$md_file" \
               --resource-path="$resource_paths" \
               -o "pdf_output/$dir_name/$base_name.pdf" \
@@ -315,6 +383,10 @@ jobs:
               --wrap=auto \
               --highlight-style=tango \
               -f markdown \
+              --top-level-division=chapter \
+              -M graphics:true \
+              -M placeins:true \
+              -M floatplacement:"figure:H" \
               2>&1 | tee conversion.log
               
             conversion_status=$?
@@ -335,7 +407,7 @@ jobs:
               
               if [ -f "conversion.log" ]; then
                 echo "转换日志:"
-                tail -30 conversion.log
+                tail -50 conversion.log
               fi
             fi
             
@@ -382,9 +454,6 @@ jobs:
             # 显示总大小
             total_size_mb=$(find pdf_output -name "*.pdf" -type f -exec stat -c%s {} \; | awk '{sum+=$1} END {print int(sum/1024/1024)}')
             echo "PDF文件总大小: ${total_size_mb}MB"
-            
-            echo "前10个最大的PDF文件:"
-            find pdf_output -name "*.pdf" -type f -exec du -h {} \; | sort -rh | head -10
           fi
       
       - name: "Create release documentation"
@@ -398,7 +467,7 @@ jobs:
           echo "# PDF 文档集" > pdf_output/README.md
           echo "" >> pdf_output/README.md
           echo "生成时间: $(date '+%Y-%m-%d %H:%M:%S')" >> pdf_output/README.md
-          echo "已优化HTML标签处理，支持图片和链接" >> pdf_output/README.md
+          echo "已优化HTML标签处理，图片位置正确" >> pdf_output/README.md
           echo "代码块带边框，自动换行" >> pdf_output/README.md
           echo "添加平铺式 'emakefun' 水印" >> pdf_output/README.md
           echo "包含resource目录中的程序文件" >> pdf_output/README.md
