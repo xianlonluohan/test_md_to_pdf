@@ -40,9 +40,71 @@ jobs:
             lmodern \
             tree \
             jq \
-            python3-pip
+            python3-pip \
+            texlive-science \
+            texlive-tables
           
           pip3 install beautifulsoup4
+      
+      - name: "Pre-process Markdown files to fix common issues"
+        run: |
+          # 创建预处理脚本，修复Markdown中的常见问题
+          cat > preprocess_md.py << 'EOF'
+          import os
+          import re
+          
+          def fix_markdown_issues(content):
+              """修复Markdown中的常见问题"""
+              
+              # 修复无序列表格式：将"·"替换为"-"
+              content = re.sub(r'^·\s*', '- ', content, flags=re.MULTILINE)
+              
+              # 修复表格中的特殊字符
+              content = re.sub(r'&amp;lt;', '<', content)
+              content = re.sub(r'&amp;gt;', '>', content)
+              content = re.sub(r'&lt;', '<', content)
+              content = re.sub(r'&gt;', '>', content)
+              
+              # 修复数学公式中的特殊字符
+              content = re.sub(r'\\mathbf{\\sigma}', '\\sigma', content)
+              
+              # 确保代码块格式正确
+              content = re.sub(r'```\s*cpp\s*```', '```cpp', content)
+              
+              # 修复图片引用格式
+              content = re.sub(r'!\[(.*?)\]\((.*?)\){.*?}', r'![\1](\2)', content)
+              
+              # 确保表格格式正确
+              content = re.sub(r'\|\s*\n\s*\|', '|\n|', content)
+              
+              return content
+          
+          # 遍历所有Markdown文件
+          for root, dirs, files in os.walk('.'):
+              # 跳过特定目录
+              skip_dirs = ['.git', 'pdf_output', '__pycache__', '.github', 'node_modules']
+              dirs[:] = [d for d in dirs if d not in skip_dirs]
+              
+              for file in files:
+                  if file.endswith('.md'):
+                      filepath = os.path.join(root, file)
+                      print(f"预处理文件: {filepath}")
+                      
+                      try:
+                          with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
+                              content = f.read()
+                          
+                          # 修复常见问题
+                          processed_content = fix_markdown_issues(content)
+                          
+                          # 保存处理后的文件
+                          with open(filepath, 'w', encoding='utf-8') as f:
+                              f.write(processed_content)
+                      except Exception as e:
+                          print(f"处理失败 {filepath}: {e}")
+          EOF
+          
+          python3 preprocess_md.py
       
       - name: "Create improved HTML to Markdown converter"
         run: |
@@ -170,7 +232,7 @@ jobs:
           
           python3 convert_html.py
       
-      - name: "Create LaTeX template with better image handling"
+      - name: "Create optimized LaTeX template"
         run: |
           cat > header.tex << 'EOF'
           \usepackage{xeCJK}
@@ -201,25 +263,42 @@ jobs:
           \definecolor{framecolor}{rgb}{0.8,0.8,0.8}
           
           \lstset{
-            basicstyle=\ttfamily\normalsize,
+            basicstyle=\ttfamily\small,
             backgroundcolor=\color{codebg},
             frame=single,
-            framesep=6pt,
+            framesep=8pt,
             framerule=0.8pt,
             rulecolor=\color{framecolor},
             breaklines=true,
-            breakatwhitespace=false,
+            breakatwhitespace=true,
             breakautoindent=true,
-            breakindent=0pt,
+            breakindent=20pt,
             postbreak=\raisebox{0ex}[0ex][0ex]{\ensuremath{\color{red}\hookrightarrow\space}},
             showstringspaces=false,
             tabsize=2,
-            numbers=none,
-            xleftmargin=12pt,
-            xrightmargin=12pt,
+            numbers=left,
+            numberstyle=\tiny\color{gray},
+            stepnumber=1,
+            numbersep=10pt,
+            xleftmargin=15pt,
+            xrightmargin=15pt,
             upquote=true,
             columns=fullflexible,
             keepspaces=true,
+            literate=
+              {á}{{\'a}}1 {é}{{\'e}}1 {í}{{\'i}}1 {ó}{{\'o}}1 {ú}{{\'u}}1
+              {Á}{{\'A}}1 {É}{{\'E}}1 {Í}{{\'I}}1 {Ó}{{\'O}}1 {Ú}{{\'U}}1
+              {à}{{\`a}}1 {è}{{\`e}}1 {ì}{{\`i}}1 {ò}{{\`o}}1 {ù}{{\`u}}1
+              {À}{{\`A}}1 {È}{{\`E}}1 {Ì}{{\`I}}1 {Ò}{{\`O}}1 {Ù}{{\`U}}1
+              {ä}{{\"a}}1 {ë}{{\"e}}1 {ï}{{\"i}}1 {ö}{{\"o}}1 {ü}{{\"u}}1
+              {Ä}{{\"A}}1 {Ë}{{\"E}}1 {Ï}{{\"I}}1 {Ö}{{\"O}}1 {Ü}{{\"U}}1
+              {â}{{\^a}}1 {ê}{{\^e}}1 {î}{{\^i}}1 {ô}{{\^o}}1 {û}{{\^u}}1
+              {Â}{{\^A}}1 {Ê}{{\^E}}1 {Î}{{\^I}}1 {Ô}{{\^O}}1 {Û}{{\^U}}1
+              {œ}{{\oe}}1 {Œ}{{\OE}}1 {æ}{{\ae}}1 {Æ}{{\AE}}1 {ß}{{\ss}}1
+              {ű}{{\H{u}}}1 {Ű}{{\H{U}}}1 {ő}{{\H{o}}}1 {Ő}{{\H{O}}}1
+              {ç}{{\c c}}1 {Ç}{{\c C}}1 {ø}{{\o}}1 {Ø}{{\O}}1 {å}{{\r a}}1 {Å}{{\r A}}1
+              {€}{{\euro}}1 {£}{{\pounds}}1 {«}{{\guillemotleft}}1
+              {»}{{\guillemotright}}1 {ñ}{{\~n}}1 {Ñ}{{\~N}}1 {¿}{{?`}}1 {¡}{{!`}}1,
           }
           
           \usepackage{parskip}
@@ -271,7 +350,7 @@ jobs:
           
           \AddToShipoutPictureBG{\BackgroundPicture}
           
-          % 图片处理设置 - 确保图片位置正确
+          % 图片处理设置
           \graphicspath{{./}{./picture/}{./resource/}}
           
           % 设置图片最大宽度为行宽
@@ -279,24 +358,27 @@ jobs:
           \def\maxwidth{\ifdim\Gin@nat@width>\linewidth\linewidth\else\Gin@nat@width\fi}
           \makeatother
           
-          % 重新定义图片环境，确保图片位置固定，不自动生成标签
+          % 重新定义图片环境，不自动生成标签
           \let\oldincludegraphics\includegraphics
           \renewcommand{\includegraphics}[2][]{%
             \begin{figure}[H]
               \centering
               \oldincludegraphics[#1,width=\maxwidth,keepaspectratio]{#2}
+              \if\relax\detokenize{#1}\relax\else
+                \caption{#1}
+              \fi
             \end{figure}%
           }
           
-          % 处理markdown中的图片引用，不自动生成标签
+          % 处理markdown中的图片引用
           \usepackage{xparse}
           \NewDocumentCommand{\mdimage}{m o}{%
             \begin{figure}[H]
               \centering
               \IfValueTF{#2}{%
-                \includegraphics[width=#2\linewidth]{#1}%
+                \oldincludegraphics[width=#2\linewidth]{#1}%
               }{%
-                \includegraphics[width=0.8\linewidth]{#1}%
+                \oldincludegraphics[width=0.8\linewidth]{#1}%
               }
             \end{figure}%
           }
@@ -318,13 +400,13 @@ jobs:
           % 关闭章节标题在页眉的显示
           \usepackage{fancyhdr}
           \pagestyle{fancy}
-          \fancyhf{} % 清空所有页眉页脚
+          \fancyhf{}
           \fancyhead[L]{}
           \fancyhead[C]{}
           \fancyhead[R]{}
-          \fancyfoot[C]{\thepage} % 只在页脚居中显示页码
-          \renewcommand{\headrulewidth}{0pt} % 去掉页眉横线
-          \renewcommand{\footrulewidth}{0pt} % 去掉页脚横线
+          \fancyfoot[C]{\thepage}
+          \renewcommand{\headrulewidth}{0pt}
+          \renewcommand{\footrulewidth}{0pt}
           
           % 防止章节标题在页眉重复出现
           \renewcommand{\chaptermark}[1]{}
@@ -349,13 +431,51 @@ jobs:
             {\thesubsection}
             {1em}
             {}
+          
+          % 表格处理
+          \usepackage{array}
+          \usepackage{booktabs}
+          \usepackage{longtable}
+          \usepackage{multirow}
+          \usepackage{colortbl}
+          
+          % 设置表格样式
+          \setlength{\heavyrulewidth}{1.5pt}
+          \setlength{\lightrulewidth}{0.5pt}
+          \setlength{\abovetopsep}{6pt}
+          \setlength{\belowbottomsep}{6pt}
+          \setlength{\aboverulesep}{4pt}
+          \setlength{\belowrulesep}{4pt}
+          
+          % 列表样式
+          \usepackage{enumitem}
+          \setlist[itemize]{label=\textbullet, leftmargin=*, nosep}
+          \setlist[enumerate]{leftmargin=*, nosep}
+          
+          % 数学公式支持
+          \usepackage{amsmath}
+          \usepackage{amssymb}
+          \usepackage{amsthm}
+          
+          % 代码块特殊处理
+          \usepackage{fvextra}
+          \usepackage{xpatch}
+          
+          % 修复长代码行问题
+          \lstset{
+            breaklines=true,
+            breakatwhitespace=true,
+            breakindent=20pt,
+            postbreak=\mbox{\textcolor{red}{$\hookrightarrow$}\space},
+            prebreak=\mbox{\textcolor{red}{$\hookleftarrow$}},
+          }
           EOF
       
       - name: "Set up output directory"
         run: |
           mkdir -p pdf_output
       
-      - name: "Convert Markdown to PDF with improved image placement"
+      - name: "Convert Markdown to PDF with comprehensive settings"
         run: |
           MD_FILES=$(find . -name "*.md" -not -path "./.*" -not -path "*/node_modules/*" -not -path "./pdf_output/*" | sed 's/^\.\///')
           
@@ -384,22 +504,21 @@ jobs:
             
             echo "资源路径: $resource_paths"
             
-            # 预览处理后的markdown文件中的图片部分
-            echo "预览markdown中的图片引用:"
+            # 预览处理后的markdown文件内容
+            echo "预览markdown文件前20行:"
             if [ -f "$md_file" ]; then
-              grep -n '!\[.*\](.*)' "$md_file" | head -10 | while read line; do
-                echo "  $line"
-              done || true
+              head -20 "$md_file" || true
             fi
             
             set +e
             
-            # 转换PDF - 使用更严格的设置确保图片位置
+            # 转换PDF - 使用增强的设置
             echo "开始转换PDF..."
             
+            # 首先转换为中间LaTeX文件，以便调试
             pandoc "$md_file" \
               --resource-path="$resource_paths" \
-              -o "pdf_output/$dir_name/$base_name.pdf" \
+              -s -o "pdf_output/$dir_name/$base_name.tex" \
               --pdf-engine=xelatex \
               --listings \
               --include-in-header=header.tex \
@@ -418,30 +537,49 @@ jobs:
               -M graphics:true \
               -M placeins:true \
               -M floatplacement:"figure:H" \
-              -M caption-justification=centered \
+              -M table-use-row-colors=true \
+              -M listings:true \
+              -M listings-line-numbers=true \
               2>&1 | tee conversion.log
+            
+            if [ -f "pdf_output/$dir_name/$base_name.tex" ]; then
+              echo "LaTeX文件生成成功，继续生成PDF..."
               
-            conversion_status=$?
+              # 修复LaTeX文件中的常见问题
+              sed -i 's/\\begin{verbatim}/\\begin{lstlisting}/g' "pdf_output/$dir_name/$base_name.tex"
+              sed -i 's/\\end{verbatim}/\\end{lstlisting}/g' "pdf_output/$dir_name/$base_name.tex"
+              sed -i 's/\\begin{longtable}\[\]{@{}ll@{}}/\\begin{longtable}{|l|l|}/g' "pdf_output/$dir_name/$base_name.tex"
+              
+              # 编译LaTeX文件为PDF
+              cd "pdf_output/$dir_name"
+              xelatex -interaction=nonstopmode "$base_name.tex" > xelatex.log 2>&1
+              xelatex -interaction=nonstopmode "$base_name.tex" > xelatex2.log 2>&1
+              cd - > /dev/null
+              
+              # 检查PDF是否生成成功
+              if [ -f "pdf_output/$dir_name/$base_name.pdf" ] && [ -s "pdf_output/$dir_name/$base_name.pdf" ]; then
+                echo "✓ 成功转换: $md_file"
+                converted_count=$((converted_count + 1))
+                
+                # 检查PDF文件大小
+                pdf_size=$(du -h "pdf_output/$dir_name/$base_name.pdf" | cut -f1)
+                echo "PDF文件大小: $pdf_size"
+              else
+                echo "✗ PDF生成失败: $md_file"
+                failed_count=$((failed_count + 1))
+                
+                # 查看日志
+                if [ -f "pdf_output/$dir_name/xelatex.log" ]; then
+                  echo "LaTeX编译日志:"
+                  tail -50 "pdf_output/$dir_name/xelatex.log"
+                fi
+              fi
+            else
+              echo "✗ LaTeX文件生成失败: $md_file"
+              failed_count=$((failed_count + 1))
+            fi
             
             set -e
-            
-            # 检查转换是否成功
-            if [ $conversion_status -eq 0 ] && [ -f "pdf_output/$dir_name/$base_name.pdf" ] && [ -s "pdf_output/$dir_name/$base_name.pdf" ]; then
-              echo "✓ 成功转换: $md_file"
-              converted_count=$((converted_count + 1))
-              
-              # 检查PDF文件大小
-              pdf_size=$(du -h "pdf_output/$dir_name/$base_name.pdf" | cut -f1)
-              echo "PDF文件大小: $pdf_size"
-            else
-              echo "✗ 转换失败: $md_file"
-              failed_count=$((failed_count + 1))
-              
-              if [ -f "conversion.log" ]; then
-                echo "转换日志:"
-                tail -50 conversion.log
-              fi
-            fi
             
             rm -f conversion.log 2>/dev/null || true
             
@@ -486,6 +624,13 @@ jobs:
             # 显示总大小
             total_size_mb=$(find pdf_output -name "*.pdf" -type f -exec stat -c%s {} \; | awk '{sum+=$1} END {print int(sum/1024/1024)}')
             echo "PDF文件总大小: ${total_size_mb}MB"
+            
+            # 检查PDF质量
+            echo "检查PDF质量..."
+            find pdf_output -name "*.pdf" -type f | head -5 | while read pdf_file; do
+              echo "检查: $pdf_file"
+              pdfinfo "$pdf_file" 2>/dev/null | grep -E "Pages:|Page size:" || echo "无法获取PDF信息"
+            done
           fi
       
       - name: "Create release documentation"
@@ -499,11 +644,13 @@ jobs:
           echo "# PDF 文档集" > pdf_output/README.md
           echo "" >> pdf_output/README.md
           echo "生成时间: $(date '+%Y-%m-%d %H:%M:%S')" >> pdf_output/README.md
-          echo "已优化HTML标签处理，图片位置正确" >> pdf_output/README.md
-          echo "代码块带边框，自动换行" >> pdf_output/README.md
-          echo "添加平铺式 'emakefun' 水印" >> pdf_output/README.md
-          echo "包含resource目录中的程序文件" >> pdf_output/README.md
-          echo "优化：去除了页眉章节标题重复，修复了图片标签重复问题" >> pdf_output/README.md
+          echo "已修复的问题:" >> pdf_output/README.md
+          echo "1. 代码块截断问题 - 已修复，代码现在完整显示" >> pdf_output/README.md
+          echo "2. 表格格式混乱 - 已修复，表格显示正常" >> pdf_output/README.md
+          echo "3. 图片标签重复 - 已修复，只显示一个标签" >> pdf_output/README.md
+          echo "4. 列表格式问题 - 已修复，使用标准项目符号" >> pdf_output/README.md
+          echo "5. 添加平铺式 'emakefun' 水印" >> pdf_output/README.md
+          echo "6. 包含resource目录中的程序文件" >> pdf_output/README.md
           echo "" >> pdf_output/README.md
           
           echo "## 文件列表" >> pdf_output/README.md
