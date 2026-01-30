@@ -45,7 +45,6 @@ jobs:
       - name: "Create LaTeX template"
         run: |
           cat > header.tex << 'EOF'
-          \documentclass{article}
           \usepackage{xeCJK}
           \usepackage[UTF8]{ctex}
           \setCJKmainfont{Noto Serif CJK SC}
@@ -55,6 +54,8 @@ jobs:
           \usepackage[margin=1.2in]{geometry}
           \usepackage{graphicx}  % 添加图片支持
           \usepackage{float}     % 添加浮动体控制
+          \usepackage{caption}   % 添加图片标题支持
+          \usepackage{wrapfig}   % 添加图文混排支持
 
           % 增强超链接支持
           \usepackage[pdftex,
@@ -147,6 +148,10 @@ jobs:
           }
 
           \AddToShipoutPictureBG{\BackgroundPicture}
+          
+          % 处理HTML链接转换
+          \usepackage{url}
+          \urlstyle{same}
           EOF
       
       - name: "Set up output directory"
@@ -155,6 +160,8 @@ jobs:
       
       - name: "Copy supporting files"
         run: |
+          echo "开始复制支持文件..."
+          
           # 查找并复制所有图片文件
           find . -type f \( -name "*.png" -o -name "*.jpg" -o -name "*.jpeg" -o -name "*.gif" -o -name "*.svg" \) \
             -not -path "./.*" \
@@ -163,24 +170,31 @@ jobs:
             | while read img; do
                 dir=$(dirname "$img")
                 mkdir -p "pdf_output/$dir"
-                cp "$img" "pdf_output/$dir/"
+                cp "$img" "pdf_output/$dir/" && echo "复制: $img -> pdf_output/$dir/"
               done
           
-          # 确保常见图片目录存在
-          for dir in picture pictures images img; do
+          # 检查并复制常见的图片目录
+          echo "检查常见图片目录..."
+          for dir in picture pictures images img resource; do
             if [ -d "$dir" ]; then
+              echo "发现目录: $dir"
               mkdir -p "pdf_output/$dir"
-              cp -r "$dir"/* "pdf_output/$dir/" 2>/dev/null || true
+              find "$dir" -type f \( -name "*.png" -o -name "*.jpg" -o -name "*.jpeg" -o -name "*.gif" \) \
+                -exec cp {} "pdf_output/$dir/" \; 2>/dev/null || true
             fi
           done
       
       - name: "Convert Markdown to PDF"
         run: |
+          # 查找所有Markdown文件
           MD_FILES=$(find . -name "*.md" -not -path "./.*" -not -path "*/node_modules/*" -not -path "*/pdf_output/*" | sed 's/^\.\///')
           
           IFS=$'\n'
           converted_count=0
           failed_count=0
+          
+          echo "找到的Markdown文件:"
+          echo "$MD_FILES" | while read file; do echo "  $file"; done
           
           for md_file in $MD_FILES; do
             [ -z "$md_file" ] && continue
@@ -192,26 +206,18 @@ jobs:
             
             md_dir=$(dirname "$md_file")
             
-            # 复制资源目录
-            if [ -d "$dir_name/resource" ]; then
-              mkdir -p "pdf_output/$dir_name/resource"
-              find "$dir_name/resource" -type f -exec cp {} "pdf_output/$dir_name/resource/" 2>/dev/null \; || true
-            fi
-            
-            # 确保图片目录存在
-            if [ -d "$dir_name/picture" ]; then
-              mkdir -p "pdf_output/$dir_name/picture"
-              find "$dir_name/picture" -type f -exec cp {} "pdf_output/$dir_name/picture/" 2>/dev/null \; || true
-            fi
-            
             echo "正在转换: $md_file"
+            echo "输出到: pdf_output/$dir_name/$base_name.pdf"
+            
+            # 创建临时目录用于转换
+            temp_dir=$(mktemp -d)
             
             set +e
             
-            # 构建资源路径，包括当前目录、父目录和图片目录
-            resource_paths="$md_dir:.:"
-            resource_paths+="$(find . -type d -name "picture" -o -name "pictures" -o -name "images" -o -name "img" 2>/dev/null | tr '\n' ':')"
+            # 构建资源路径
+            resource_paths="$md_dir:.:./pdf_output"
             
+            # 使用pandoc进行转换
             pandoc "$md_file" \
               --resource-path="$resource_paths" \
               -o "pdf_output/$dir_name/$base_name.pdf" \
@@ -233,26 +239,29 @@ jobs:
               --extract-media="pdf_output/$dir_name" \
               -f markdown+smart \
               -t pdf \
-              --verbose 2>&1 | tee -a conversion.log
+              --verbose 2>&1 | tee "$temp_dir/pandoc.log"
+            
+            pandoc_exit_code=$?
             
             set -e
             
-            if [ -f "pdf_output/$dir_name/$base_name.pdf" ] && [ -s "pdf_output/$dir_name/$base_name.pdf" ]; then
+            # 检查转换结果
+            if [ $pandoc_exit_code -eq 0 ] && [ -f "pdf_output/$dir_name/$base_name.pdf" ] && [ -s "pdf_output/$dir_name/$base_name.pdf" ]; then
               echo "✓ 成功转换: $md_file"
               converted_count=$((converted_count + 1))
             else
-              echo "✗ 转换失败: $md_file"
+              echo "✗ 转换失败: $md_file (退出码: $pandoc_exit_code)"
+              echo "=== 转换日志开始 ==="
+              cat "$temp_dir/pandoc.log" 2>/dev/null || echo "无日志"
+              echo "=== 转换日志结束 ==="
               failed_count=$((failed_count + 1))
             fi
+            
+            # 清理临时目录
+            rm -rf "$temp_dir"
           done
           
           echo "转换完成: $converted_count 成功, $failed_count 失败"
-          
-          # 显示转换日志
-          if [ -f "conversion.log" ]; then
-            echo "=== 转换日志 ==="
-            tail -50 conversion.log
-          fi
           
           if [ $converted_count -eq 0 ] && [ $failed_count -gt 0 ]; then
             echo "所有转换都失败！"
@@ -261,6 +270,8 @@ jobs:
       
       - name: "Verify PDF files"
         run: |
+          echo "开始验证PDF文件..."
+          
           total_pdfs=$(find pdf_output -name "*.pdf" -type f 2>/dev/null | wc -l)
           
           if [ $total_pdfs -eq 0 ]; then
@@ -269,11 +280,10 @@ jobs:
           fi
           
           echo "找到 $total_pdfs 个 PDF 文件:"
-          find pdf_output -name "*.pdf" -type f | sed 's/^/  /'
-          
-          # 检查 PDF 文件大小
-          echo "=== PDF 文件大小 ==="
-          find pdf_output -name "*.pdf" -type f -exec du -h {} \; | sort -hr
+          find pdf_output -name "*.pdf" -type f | sort | while read pdf; do
+            size=$(du -h "$pdf" | cut -f1)
+            echo "  $pdf ($size)"
+          done
       
       - name: "Create release documentation"
         run: |
@@ -316,14 +326,6 @@ jobs:
           
           echo "" >> pdf_output/README.md
           echo "总计: $PDF_COUNT 个 PDF 文件" >> pdf_output/README.md
-          
-          # 添加已知问题说明
-          echo "" >> pdf_output/README.md
-          echo "## 注意事项" >> pdf_output/README.md
-          echo "" >> pdf_output/README.md
-          echo "1. 图片显示: 已添加对常见图片格式的支持" >> pdf_output/README.md
-          echo "2. 链接可点击: 已配置超链接为蓝色可点击文字" >> pdf_output/README.md
-          echo "3. 代码块: 带边框和自动换行" >> pdf_output/README.md
       
       - name: "Create zip archive for release"
         if: startsWith(github.ref, 'refs/tags/')
