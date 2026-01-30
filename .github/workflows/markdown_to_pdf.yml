@@ -41,9 +41,8 @@ jobs:
             tree \
             jq \
             python3-pip \
-            imagemagick \
-            optipng \
-            jpegoptim
+            qpdf \
+            ghostscript
           
           pip3 install beautifulsoup4
       
@@ -57,9 +56,6 @@ jobs:
           def convert_html_to_markdown(content, file_path):
               """将HTML标签转换为Markdown格式"""
               
-              # 获取markdown文件所在目录
-              md_dir = os.path.dirname(file_path)
-              
               # 处理图片标签
               img_pattern = re.compile(r'<img\s+([^>]+)>', re.IGNORECASE)
               
@@ -69,27 +65,17 @@ jobs:
                   # 提取属性
                   src_match = re.search(r'src\s*=\s*["\']([^"\']+)["\']', attrs_str)
                   alt_match = re.search(r'alt\s*=\s*["\']([^"\']*)["\']', attrs_str)
-                  width_match = re.search(r'width\s*=\s*["\']([^"\']+)["\']', attrs_str)
                   
                   src = src_match.group(1) if src_match else ''
                   alt = alt_match.group(1) if alt_match else ''
                   
-                  # 清理src路径
+                  # 清理src路径 - 移除开头的./或/
                   if src:
-                      # 移除开头的./或/
                       src = re.sub(r'^\./', '', src)
                       src = re.sub(r'^/', '', src)
-                      
-                      # 如果图片路径是相对路径，保持原样
-                      # 让Pandoc在转换时自己处理图片路径
                   
                   # 返回Markdown图片格式
-                  if width_match:
-                      width = width_match.group(1)
-                      # 对于PDF，我们可以在LaTeX中处理宽度
-                      return f'![{alt}]({src})'
-                  else:
-                      return f'![{alt}]({src})'
+                  return f'![{alt}]({src})'
               
               content = img_pattern.sub(replace_img_tag, content)
               
@@ -108,15 +94,10 @@ jobs:
               
               content = link_pattern.sub(replace_link_tag, content)
               
-              # 处理center标签 - 移除即可，不需要特殊处理
+              # 处理center标签 - 移除即可
               content = re.sub(r'<center>(.*?)</center>', r'\1', content, flags=re.DOTALL | re.IGNORECASE)
               
-              # 处理table标签 - 转换为Markdown表格
-              # 首先移除所有HTML表格标签，保留纯文本
-              content = re.sub(r'<table[^>]*>|</table>', '', content)
-              content = re.sub(r'<tr[^>]*>|</tr>', '', content)
-              content = re.sub(r'<td[^>]*>|</td>', ' ', content)
-              content = re.sub(r'<th[^>]*>|</th>', ' **', content)
+              # 移除所有其他HTML标签，保留内容
               content = re.sub(r'<[^>]+>', '', content)
               
               return content
@@ -269,19 +250,25 @@ jobs:
             \oldincludegraphics[#1,width=\maxwidth]{#2}%
           }
           
-          % 优化PDF输出 - 减少文件大小
-          \pdfcompresslevel=9
-          \pdfminorversion=5
-          
-          % 优化图片嵌入
-          \usepackage{grffile}
+          % 不再使用\pdfcompresslevel，因为它不兼容xelatex
           EOF
+      
+      - name: "Collect image file information"
+        run: |
+          # 查找所有图片文件，记录它们的位置
+          echo "查找项目中的图片文件..."
+          find . -type f \( -name "*.png" -o -name "*.jpg" -o -name "*.jpeg" -o -name "*.gif" -o -name "*.svg" -o -name "*.bmp" \) \
+            -not -path "./.*" -not -path "./pdf_output/*" | \
+            head -20 > image_list.txt || true
+          
+          echo "找到的部分图片文件:"
+          cat image_list.txt || echo "没有找到图片文件"
       
       - name: "Set up output directory"
         run: |
           mkdir -p pdf_output
       
-      - name: "Convert Markdown to PDF with optimized settings"
+      - name: "Convert Markdown to PDF"
         run: |
           MD_FILES=$(find . -name "*.md" -not -path "./.*" -not -path "*/node_modules/*" -not -path "./pdf_output/*" | sed 's/^\.\///')
           
@@ -292,27 +279,40 @@ jobs:
           for md_file in $MD_FILES; do
             [ -z "$md_file" ] && continue
             
+            echo "========================================"
             echo "处理文件: $md_file"
+            echo "========================================"
             
             dir_name=$(dirname "$md_file")
             base_name=$(basename "$md_file" .md)
             
-            # 只创建PDF输出目录，不复制图片
+            # 只创建PDF输出目录
             mkdir -p "pdf_output/$dir_name"
             
             # 获取markdown文件所在目录
             md_dir=$(dirname "$md_file")
             
-            # 构建资源路径 - 只包含原始路径，不复制文件
-            resource_paths="$md_dir:.:./picture:./resource"
+            # 构建资源路径 - 包含多个可能的位置
+            # 注意：我们首先尝试markdown文件所在目录，然后是其下的picture目录
+            # 然后是项目根目录的picture和resource目录
+            resource_paths="$md_dir:$md_dir/picture:.:./picture:./resource"
             
             echo "资源路径: $resource_paths"
             
+            # 检查markdown文件中提到的图片
+            echo "检查图片引用..."
+            if [ -f "$md_file" ]; then
+              grep -o '!\[.*\](.*)' "$md_file" | head -5 | while read img; do
+                echo "  找到图片引用: $img"
+              done || true
+            fi
+            
             set +e
             
-            # 转换PDF - 使用优化的设置减少文件大小
+            # 转换PDF - 使用简单的设置
             echo "开始转换PDF..."
             
+            # 先尝试直接转换
             pandoc "$md_file" \
               --resource-path="$resource_paths" \
               -o "pdf_output/$dir_name/$base_name.pdf" \
@@ -330,7 +330,6 @@ jobs:
               --wrap=auto \
               --highlight-style=tango \
               -f markdown \
-              --pdf-engine-opt="-shell-escape" \
               2>&1 | tee conversion.log
               
             conversion_status=$?
@@ -345,66 +344,112 @@ jobs:
               # 检查PDF文件大小
               pdf_size=$(du -h "pdf_output/$dir_name/$base_name.pdf" | cut -f1)
               echo "PDF文件大小: $pdf_size"
-              
-              # 优化PDF文件大小（可选）
-              if command -v qpdf &> /dev/null; then
-                echo "优化PDF文件大小..."
-                qpdf --linearize "pdf_output/$dir_name/$base_name.pdf" "pdf_output/$dir_name/${base_name}_optimized.pdf" && \
-                mv "pdf_output/$dir_name/${base_name}_optimized.pdf" "pdf_output/$dir_name/$base_name.pdf"
-              fi
             else
-              echo "✗ 转换失败: $md_file"
-              failed_count=$((failed_count + 1))
+              echo "✗ 第一次尝试转换失败: $md_file"
               
-              if [ -f "conversion.log" ]; then
-                echo "转换日志:"
-                tail -20 conversion.log
+              # 尝试另一种方法：如果图片路径有问题，尝试复制图片到临时目录
+              echo "尝试替代方法..."
+              
+              # 创建临时目录并复制可能需要的图片
+              temp_dir=$(mktemp -d)
+              mkdir -p "$temp_dir/picture"
+              
+              # 从markdown文件中提取图片文件名并尝试复制
+              if [ -f "$md_file" ]; then
+                grep -o '!\[.*\](\([^)]*\))' "$md_file" | sed 's/.*(//;s/)//' | while read img_path; do
+                  # 清理路径
+                  img_path=$(echo "$img_path" | sed 's/^\.\///')
+                  
+                  # 尝试从多个位置查找图片
+                  for search_dir in "$md_dir" "$md_dir/picture" "." "./picture" "./resource"; do
+                    if [ -f "$search_dir/$img_path" ]; then
+                      echo "  复制图片: $search_dir/$img_path -> $temp_dir/picture/"
+                      cp "$search_dir/$img_path" "$temp_dir/picture/" 2>/dev/null && break
+                    fi
+                  done
+                done
               fi
+              
+              # 使用临时目录作为资源路径再次尝试
+              temp_resource_paths="$temp_dir:$temp_dir/picture:$md_dir:.:./picture:./resource"
+              
+              set +e
+              pandoc "$md_file" \
+                --resource-path="$temp_resource_paths" \
+                -o "pdf_output/$dir_name/$base_name.pdf" \
+                --pdf-engine=xelatex \
+                --listings \
+                --include-in-header=header.tex \
+                -V mainfont="Noto Serif CJK SC" \
+                -V sansfont="Noto Sans CJK SC" \
+                -V monofont="Noto Sans Mono CJK SC" \
+                -V geometry:margin=1.2in \
+                -V geometry:a4paper \
+                -V colorlinks=true \
+                -V linkcolor=blue \
+                -V urlcolor=blue \
+                --wrap=auto \
+                --highlight-style=tango \
+                -f markdown \
+                2>&1 | tee conversion2.log
+                
+              conversion_status2=$?
+              set -e
+              
+              # 清理临时目录
+              rm -rf "$temp_dir"
+              
+              if [ $conversion_status2 -eq 0 ] && [ -f "pdf_output/$dir_name/$base_name.pdf" ] && [ -s "pdf_output/$dir_name/$base_name.pdf" ]; then
+                echo "✓ 第二次尝试成功转换: $md_file"
+                converted_count=$((converted_count + 1))
+                
+                pdf_size=$(du -h "pdf_output/$dir_name/$base_name.pdf" | cut -f1)
+                echo "PDF文件大小: $pdf_size"
+              else
+                echo "✗ 转换失败: $md_file"
+                failed_count=$((failed_count + 1))
+                
+                if [ -f "conversion.log" ]; then
+                  echo "第一次尝试日志:"
+                  tail -20 conversion.log
+                fi
+                
+                if [ -f "conversion2.log" ]; then
+                  echo "第二次尝试日志:"
+                  tail -20 conversion2.log
+                fi
+              fi
+              
+              rm -f conversion.log conversion2.log 2>/dev/null || true
             fi
-            
-            rm -f conversion.log 2>/dev/null || true
             
             echo ""
           done
           
+          echo "========================================"
           echo "转换汇总: $converted_count 成功, $failed_count 失败"
+          echo "========================================"
           
           if [ $converted_count -eq 0 ] && [ $failed_count -gt 0 ]; then
             echo "所有转换都失败了!"
             exit 1
           fi
       
-      - name: "Install qpdf for PDF optimization"
-        run: |
-          sudo apt-get install -y qpdf
-      
-      - name: "Optimize PDF files to reduce size"
+      - name: "Optimize PDF files"
         run: |
           echo "优化PDF文件大小..."
-          total_size_before=0
-          total_size_after=0
           
           find pdf_output -name "*.pdf" -type f | while read pdf_file; do
-            size_before=$(stat -c%s "$pdf_file")
-            total_size_before=$((total_size_before + size_before))
+            echo "优化: $pdf_file"
             
-            # 使用qpdf优化PDF
+            # 使用qpdf优化（线性化）
             temp_file="${pdf_file}.tmp"
-            qpdf --linearize "$pdf_file" "$temp_file" && mv "$temp_file" "$pdf_file"
+            qpdf --linearize "$pdf_file" "$temp_file" 2>/dev/null && mv "$temp_file" "$pdf_file" || true
             
-            size_after=$(stat -c%s "$pdf_file")
-            total_size_after=$((total_size_after + size_after))
-            
-            reduction=$((size_before - size_after))
-            reduction_percent=$((reduction * 100 / size_before)) 2>/dev/null || reduction_percent=0
-            
-            echo "优化: $pdf_file - 前: ${size_before}字节, 后: ${size_after}字节, 减少: ${reduction}字节 (${reduction_percent}%)"
+            # 检查文件大小
+            size=$(du -h "$pdf_file" | cut -f1)
+            echo "  优化后大小: $size"
           done
-          
-          echo "总计优化前: ${total_size_before}字节 ($((total_size_before/1024/1024))MB)"
-          echo "总计优化后: ${total_size_after}字节 ($((total_size_after/1024/1024))MB)"
-          total_reduction=$((total_size_before - total_size_after))
-          echo "总计减少: ${total_reduction}字节 ($((total_reduction/1024/1024))MB)"
       
       - name: "Verify PDF files"
         run: |
@@ -417,8 +462,8 @@ jobs:
             echo "总共生成 $total_pdfs 个PDF文件"
             
             # 显示总大小
-            total_size=$(find pdf_output -name "*.pdf" -type f -exec stat -c%s {} \; | awk '{sum+=$1} END {print sum}')
-            echo "PDF文件总大小: $((total_size/1024/1024))MB"
+            total_size_mb=$(find pdf_output -name "*.pdf" -type f -exec stat -c%s {} \; | awk '{sum+=$1} END {print int(sum/1024/1024)}')
+            echo "PDF文件总大小: ${total_size_mb}MB"
             
             echo "前10个最大的PDF文件:"
             find pdf_output -name "*.pdf" -type f -exec du -h {} \; | sort -rh | head -10
@@ -497,5 +542,5 @@ jobs:
           files: |
             pdf-documents-${{ github.ref_name }}.zip
           draft: false
-          prerelease: false
+          prereview: false
           generate_release_notes: true
