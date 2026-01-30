@@ -129,17 +129,17 @@ jobs:
               ] {emakefun};
               
               % 可选：添加多个水印重复平铺
-              % \foreach \x in {-1,0,1} {
-              %   \foreach \y in {-1,0,1} {
-              %     \node at ($(page center)+(\x*0.3\paperwidth,\y*0.3\paperheight)$) [
-              %       rotate=45,
-              %       scale=6,
-              %       text=gray!10,
-              %       opacity=0.5,
-              %       font=\sffamily\bfseries
-              %     ] {emakefun};
-              %   }
-              % }
+              \foreach \x in {-1,0,1} {
+                \foreach \y in {-1,0,1} {
+                  \node at ($(page center)+(\x*0.3\paperwidth,\y*0.3\paperheight)$) [
+                    rotate=45,
+                    scale=6,
+                    text=gray!10,
+                    opacity=0.5,
+                    font=\sffamily\bfseries
+                  ] {emakefun};
+                }
+              }
             \end{tikzpicture}%
           }
           
