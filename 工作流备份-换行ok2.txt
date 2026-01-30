@@ -41,16 +41,9 @@ jobs:
             tree \
             jq
       
-      - name: "Verify font installation"
+      - name: "Create LaTeX template"
         run: |
-          echo "检查已安装的字体..."
-          fc-list :lang=zh | head -20
-          echo "Noto CJK 字体:"
-          fc-list | grep -i "noto.*cjk" | head -10
-      
-      - name: "Create LaTeX template with watermark"
-        run: |
-          # 创建带水印的LaTeX模板
+          # 创建模板，移除换行箭头
           cat > header.tex << 'EOF'
           % 中文支持 - 使用简单可靠的设置
           \usepackage{xeCJK}
@@ -60,12 +53,6 @@ jobs:
           \setCJKmainfont{Noto Serif CJK SC}
           \setCJKsansfont{Noto Sans CJK SC}
           \setCJKmonofont{Noto Sans Mono CJK SC}
-          
-          % 如果上述字体不可用，使用备用字体
-          \setCJKfamilyfont{zhsong}{Noto Serif CJK SC}
-          \setCJKfamilyfont{zhhei}{Noto Sans CJK SC}
-          \setCJKfamilyfont{zhkai}{AR PL UKai CN}
-          \setCJKfamilyfont{zhfs}{AR PL UMing CN}
           
           % 页面设置 - 使用中等边距
           \usepackage[margin=1.2in]{geometry}
@@ -91,7 +78,7 @@ jobs:
           \definecolor{commentcolor}{rgb}{0,0.5,0}
           \definecolor{stringcolor}{rgb}{0.64,0.08,0.08}
           
-          % 改进的代码块设置
+          % 改进的代码块设置 - 移除换行箭头
           \lstset{
             basicstyle=\ttfamily\footnotesize,
             backgroundcolor=\color{codebg},
@@ -103,7 +90,8 @@ jobs:
             breakatwhitespace=false,  % 允许在任何字符处换行
             breakautoindent=true,
             breakindent=0pt,
-            postbreak=\raisebox{0ex}[0ex][0ex]{\ensuremath{\color{red}\hookrightarrow\space}},
+            % 移除换行箭头，改为空或空格
+            postbreak=\mbox{},
             showstringspaces=false,
             tabsize=2,
             numbers=none,
@@ -117,27 +105,6 @@ jobs:
             stringstyle=\color{stringcolor},
           }
           
-          % C++ 代码样式
-          \lstdefinelanguage{C++}{
-            keywords={alignas, alignof, and, and_eq, asm, auto, bitand, bitor, bool,
-              break, case, catch, char, char8_t, char16_t, char32_t, class,
-              compl, concept, const, consteval, constexpr, const_cast, continue,
-              co_await, co_return, co_yield, decltype, default, delete, do,
-              double, dynamic_cast, else, enum, explicit, export, extern, false,
-              float, for, friend, goto, if, inline, int, long, mutable, namespace,
-              new, noexcept, not, not_eq, nullptr, operator, or, or_eq, private,
-              protected, public, register, reinterpret_cast, requires, return,
-              short, signed, sizeof, static, static_assert, static_cast, struct,
-              switch, template, this, thread_local, throw, true, try, typedef,
-              typeid, typename, union, unsigned, using, virtual, void, volatile,
-              wchar_t, while, xor, xor_eq},
-            sensitive=true,
-            morecomment=[l]{//},
-            morecomment=[s]{/*}{*/},
-            morestring=[b]",
-            morestring=[b]'
-          }
-          
           % 处理过长的等号和连字符
           \usepackage{seqsplit}
           
@@ -149,38 +116,15 @@ jobs:
           % 防止溢出
           \sloppy
           \emergencystretch=3em
-          
-          % ============ 添加水印设置 ============
-          \usepackage{tikz}
-          \usepackage{everypage}
-          \usepackage{transparent}
-          
-          % 定义水印命令
-          \newcommand{\watermark}{
-            \begin{tikzpicture}[remember picture, overlay]
-              % 设置水印样式
-              \node [rotate=45, scale=8, text opacity=0.08, color=gray!70] at (current page.center) {\textbf{emakefun}};
-              
-              % 可选：在四个角落也添加较小的水印
-              \node [rotate=0, scale=4, text opacity=0.05, color=gray!60] at ($(current page.north west)+(2.5,-1)$) {\textbf{emakefun}};
-              \node [rotate=0, scale=4, text opacity=0.05, color=gray!60] at ($(current page.north east)+(-2.5,-1)$) {\textbf{emakefun}};
-              \node [rotate=0, scale=4, text opacity=0.05, color=gray!60] at ($(current page.south west)+(2.5,1)$) {\textbf{emakefun}};
-              \node [rotate=0, scale=4, text opacity=0.05, color=gray!60] at ($(current page.south east)+(-2.5,1)$) {\textbf{emakefun}};
-            \end{tikzpicture}
-          }
-          
-          % 在每一页添加水印
-          \AddEverypageHook{\watermark}
-          % ============ 水印设置结束 ============
           EOF
       
       - name: "Set up output directory"
         run: |
           mkdir -p pdf_output
       
-      - name: "Convert Markdown to PDF with watermark"
+      - name: "Convert Markdown to PDF"
         run: |
-          echo "开始转换Markdown文件到PDF（带水印）..."
+          echo "开始转换Markdown文件到PDF..."
           
           # 查找所有md文件
           MD_FILES=$(find . -name "*.md" -not -path "./.*" -not -path "*/node_modules/*" | sed 's/^\.\///')
@@ -201,7 +145,7 @@ jobs:
             # 创建输出目录
             mkdir -p "pdf_output/$dir_name"
             
-            echo "正在转换: $md_file (将添加'emakefun'水印)"
+            echo "正在转换: $md_file"
             
             # 获取Markdown文件所在目录
             md_dir=$(dirname "$md_file")
@@ -217,10 +161,10 @@ jobs:
               find "$dir_name/resource" -type f -exec cp {} "pdf_output/$dir_name/resource/" 2>/dev/null \; || true
             fi
             
-            # 转换Markdown为PDF（带水印）
+            # 转换Markdown为PDF
             set +e
             
-            echo "使用带水印的简化方法转换..."
+            echo "使用简化方法转换..."
             
             # 简化转换方法，避免复杂的字体设置
             pandoc "$md_file" \
@@ -251,7 +195,7 @@ jobs:
               
               # 检查文件头部是否有效
               if file "pdf_output/$dir_name/$base_name.pdf" | grep -q "PDF document"; then
-                echo "  ✓ 成功: $base_name.pdf ($file_size) [已添加水印]"
+                echo "  ✓ 成功: $base_name.pdf ($file_size)"
                 converted_count=$((converted_count + 1))
               else
                 echo "  ⚠ 可能有问题: $base_name.pdf ($file_size)"
@@ -268,7 +212,7 @@ jobs:
           echo ""
           echo "================================"
           echo "转换完成!"
-          echo "成功: $converted_count 个文件 (均已添加'emakefun'水印)"
+          echo "成功: $converted_count 个文件"
           echo "失败: $failed_count 个文件"
           
           if [ $failed_count -gt 0 ]; then
@@ -310,7 +254,7 @@ jobs:
             
             # 使用pdfinfo验证PDF
             if pdfinfo "$pdf_file" >/dev/null 2>&1; then
-              echo "  ✓ 有效: $pdf_file ($size) [带水印]"
+              echo "  ✓ 有效: $pdf_file ($size)"
               valid_count=$((valid_count + 1))
             else
               echo "  ✗ 无效: $pdf_file ($size)"
@@ -347,11 +291,10 @@ jobs:
           if [[ "${{ github.ref }}" == refs/tags/* ]]; then
             echo "- **标签**: $TAG_NAME" >> pdf_output/README.md
           fi
-          echo "- **水印**: 已添加 'emakefun' 防盗水印" >> pdf_output/README.md
           echo "- **代码块样式**: 使用带边框的代码框，自动换行" >> pdf_output/README.md
           echo "- **页面边距**: 1.2英寸边距，防止内容溢出" >> pdf_output/README.md
           echo "- **中文字体**: 使用Noto CJK字体" >> pdf_output/README.md
-          echo "- **改进功能**: 添加防盗水印，优化代码显示" >> pdf_output/README.md
+          echo "- **改进功能**: 移除换行箭头符号，优化代码显示" >> pdf_output/README.md
           echo "" >> pdf_output/README.md
           
           echo "## 文件列表" >> pdf_output/README.md
@@ -377,11 +320,11 @@ jobs:
               fi
             fi
             
-            echo "- [$file_name]($rel_path) ($file_size) 📝" >> pdf_output/README.md
+            echo "- [$file_name]($rel_path) ($file_size)" >> pdf_output/README.md
           done
           
           echo "" >> pdf_output/README.md
-          echo "**总计: $PDF_COUNT 个 PDF 文件 (均已添加防盗水印)**" >> pdf_output/README.md
+          echo "**总计: $PDF_COUNT 个 PDF 文件**" >> pdf_output/README.md
       
       - name: "Create zip archive for release"
         if: startsWith(github.ref, 'refs/tags/')
@@ -402,7 +345,7 @@ jobs:
       - name: "Upload PDF artifacts"
         uses: actions/upload-artifact@v4
         with:
-          name: pdf-documents-with-watermark
+          name: pdf-documents
           path: |
             pdf_output/
             pdf-documents-*.zip
@@ -414,7 +357,7 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ github.ref_name }}
-          name: "PDF Documents with Watermark - ${{ github.ref_name }}"
+          name: "PDF Documents - ${{ github.ref_name }}"
           body_path: pdf_output/README.md
           files: |
             pdf-documents-${{ github.ref_name }}.zip
@@ -426,5 +369,4 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         run: |
           echo "Release 创建完成!"
-          echo "所有PDF文件均已添加'emakefun'防盗水印"
           echo "访问: https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }}"
