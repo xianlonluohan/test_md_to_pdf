@@ -1,4 +1,4 @@
-name: Markdown to PDF Converter
+name: "Markdown to PDF Converter"
 
 on:
   push:
@@ -6,7 +6,7 @@ on:
     tags: ["v*", "pdf-*"]
   pull_request:
     branches: ["main", "master"]
-  workflow_dispatch:  # 允许手动触发
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -18,12 +18,12 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-      - name: Checkout repository
+      - name: "Checkout repository"
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
       
-      - name: Install dependencies
+      - name: "Install dependencies"
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -38,77 +38,22 @@ jobs:
             fonts-wqy-zenhei \
             lmodern \
             tree \
-            jq \
-            python3 \
-            python3-pip
-          
-          pip3 install Pygments
+            jq
       
-      - name: Create LaTeX template for Chinese and code blocks
+      - name: "Create LaTeX template"
         run: |
-          # 创建优化的 LaTeX 模板
-          cat > chinese-template.tex << 'EOF'
-          % 中文支持配置
+          # 创建简单的 LaTeX 模板，专注于解决核心问题
+          cat > simple-template.tex << 'EOF'
+          \documentclass{article}
           \usepackage{xeCJK}
-          \usepackage{fontspec}
-          
-          % 设置中文字体
           \setCJKmainfont{Noto Serif CJK SC}
           \setCJKsansfont{Noto Sans CJK SC}
           \setCJKmonofont{Noto Sans Mono CJK SC}
           
-          % 设置英文字体
-          \setmainfont{TeX Gyre Termes}
-          \setsansfont{TeX Gyre Heros}
-          \setmonofont{DejaVu Sans Mono}[Scale=0.85]  % 减小等宽字体大小
+          % 页面设置
+          \usepackage[margin=1in]{geometry}
           
-          % 代码块设置 - 移除行号，强制换行
-          \usepackage{listings}
-          \usepackage{xcolor}
-          
-          % 定义代码块样式 - 无行号，强制换行
-          \lstset{
-            basicstyle=\ttfamily\footnotesize,  % 使用更小的字体
-            breaklines=true,                    % 启用自动换行
-            breakatwhitespace=false,           % 在任意字符处换行
-            breakindent=0pt,                   % 换行后缩进
-            postbreak=\raisebox{0ex}[0ex][0ex]{\ensuremath{\hookrightarrow}},  % 换行指示符
-            showstringspaces=false,
-            tabsize=2,
-            frame=single,                      % 添加边框
-            framerule=0.5pt,
-            rulecolor=\color{gray!70},
-            numbers=none,                      % 移除行号
-            backgroundcolor=\color{gray!3},    % 浅灰色背景
-            keywordstyle=\color{blue}\bfseries,
-            commentstyle=\color{green!50!black},
-            stringstyle=\color{red},
-            identifierstyle=\color{black},
-            extendedchars=true,                % 支持扩展字符集
-            inputencoding=utf8,                % UTF-8 输入编码
-            upquote=true,                      % 正确处理引号
-            showspaces=false,                  % 不显示空格
-            columns=fullflexible,              % 更好的字符间距
-            keepspaces=true,                   % 保留空格
-            breakautoindent=true,              % 自动缩进
-            prebreak=\mbox{\textcolor{red}{$\hookleftarrow$}},  % 换行前符号
-            captionpos=b,                      % 标题位置
-            abovecaptionskip=5pt,              % 标题上间距
-            belowcaptionskip=5pt,              % 标题下间距
-          }
-          
-          % 长行代码处理：允许水平滚动（通过减小边距和字体）
-          \lstdefinestyle{longcode}{
-            basicstyle=\ttfamily\scriptsize,   % 更小的字体
-            breaklines=true,
-            breakatwhitespace=false,
-            backgroundcolor=\color{gray!2},
-          }
-          
-          % 设置更窄的页边距，给代码更多空间
-          \usepackage[top=1.5cm, bottom=1.5cm, left=1cm, right=1cm]{geometry}
-          
-          % 超链接设置
+          % 超链接
           \usepackage{hyperref}
           \hypersetup{
             colorlinks=true,
@@ -117,55 +62,60 @@ jobs:
             citecolor=blue,
           }
           
-          % 列表设置
-          \usepackage{enumitem}
-          \setlist[itemize]{noitemsep, topsep=0pt}
-          \setlist[enumerate]{noitemsep, topsep=0pt}
+          % 代码块设置 - 使用 listings
+          \usepackage{listings}
+          \usepackage{xcolor}
           
-          % 段落间距
+          \definecolor{codebg}{rgb}{0.95,0.95,0.95}
+          \definecolor{framecolor}{rgb}{0.7,0.7,0.7}
+          
+          \lstset{
+            basicstyle=\ttfamily\small,
+            backgroundcolor=\color{codebg},
+            frame=single,
+            framesep=5pt,
+            framerule=0.5pt,
+            rulecolor=\color{framecolor},
+            breaklines=true,
+            breakatwhitespace=false,
+            breakautoindent=true,
+            showstringspaces=false,
+            tabsize=2,
+            numbers=none,
+            xleftmargin=10pt,
+            xrightmargin=10pt,
+          }
+          
+          % 段落设置
           \usepackage{parskip}
-          \setlength{\parindent}{2em}  % 段落首行缩进
-          \setlength{\parskip}{0.5em}  % 段落间距
+          \setlength{\parindent}{0pt}
+          \setlength{\parskip}{0.5em}
           
-          % 自定义代码块环境，处理长代码
-          \lstnewenvironment{longcodestyle}[1][]
-            {\lstset{style=longcode,#1}}
-            {}
+          \begin{document}
+          EOF
+          
+          # 创建 end-template.tex
+          cat > end-template.tex << 'EOF'
+          \end{document}
           EOF
       
-      - name: Find Markdown files
-        id: find-md
-        run: |
-          # 查找所有md文件，排除node_modules等目录
-          MD_FILES=$(find . -name "*.md" -not -path "./.*" -not -path "*/node_modules/*" | sed 's/^\.\///')
-          
-          {
-            echo "found_md_files<<EOF"
-            echo "$MD_FILES"
-            echo "EOF"
-          } >> $GITHUB_OUTPUT
-          
-          DIRS=$(find . -type f -name "*.md" -not -path "./.*" -not -path "*/node_modules/*" -exec dirname {} \; | sort -u | sed 's/^\.\///')
-          {
-            echo "dirs<<EOF"
-            echo "$DIRS"
-            echo "EOF"
-          } >> $GITHUB_OUTPUT
-      
-      - name: Set up output directory
+      - name: "Set up output directory"
         run: |
           mkdir -p pdf_output
       
-      - name: Convert Markdown to PDF with improved code blocks
+      - name: "Convert Markdown to PDF"
         run: |
-          MD_FILES="${{ steps.find-md.outputs.found_md_files }}"
+          echo "开始转换Markdown文件到PDF..."
           
-          echo "开始转换Markdown文件到PDF（优化代码块处理）..."
+          # 查找所有md文件
+          MD_FILES=$(find . -name "*.md" -not -path "./.*" -not -path "*/node_modules/*" | sed 's/^\.\///')
+          
           echo "找到的文件数量: $(echo "$MD_FILES" | wc -l)"
           
           IFS=$'\n'
           converted_count=0
           failed_count=0
+          failed_files=""
           
           for md_file in $MD_FILES; do
             [ -z "$md_file" ] && continue
@@ -173,80 +123,66 @@ jobs:
             dir_name=$(dirname "$md_file")
             base_name=$(basename "$md_file" .md)
             
+            # 创建输出目录
             mkdir -p "pdf_output/$dir_name"
             
             echo "正在转换: $md_file"
             
+            # 获取Markdown文件所在目录
             md_dir=$(dirname "$md_file")
             
-            # 复制资源文件
+            # 复制图片文件夹
             if [ -d "$dir_name/picture" ]; then
               mkdir -p "pdf_output/$dir_name/picture"
-              find "$dir_name/picture" -type f -exec cp {} "pdf_output/$dir_name/picture/" 2>/dev/null \; || true
+              find "$dir_name/picture" -type f \( -name "*.png" -o -name "*.jpg" -o -name "*.jpeg" \) -exec cp {} "pdf_output/$dir_name/picture/" 2>/dev/null \; || true
             fi
             
+            # 复制资源文件夹
             if [ -d "$dir_name/resource" ]; then
               mkdir -p "pdf_output/$dir_name/resource"
               find "$dir_name/resource" -type f -exec cp {} "pdf_output/$dir_name/resource/" 2>/dev/null \; || true
             fi
             
-            # 方法1：使用优化后的 listings 宏包
-            echo "使用优化后的 listings 配置..."
+            # 尝试简单的转换方法
             set +e
             
-            # 预处理：检查文件是否包含长代码行
-            long_lines=$(grep -n '^[[:space:]]*```' "$md_file" | wc -l)
-            if [ $long_lines -gt 0 ]; then
-              echo "  检测到代码块，使用优化设置..."
-            fi
-            
-            # 使用优化模板转换
+            # 方法1：使用最简单的 pandoc 命令
             pandoc "$md_file" \
               --resource-path="$md_dir:.:." \
               -o "pdf_output/$dir_name/$base_name.pdf" \
               --pdf-engine=xelatex \
               --listings \
-              -H chinese-template.tex \
+              -H simple-template.tex \
+              --template=default \
               -V mainfont="Noto Serif CJK SC" \
-              -V sansfont="Noto Sans CJK SC" \
               -V monofont="Noto Sans Mono CJK SC" \
-              -V geometry:"top=1.5cm, bottom=1.5cm, left=1cm, right=1cm" \
+              -V geometry:margin=1in \
               -V colorlinks=true \
               -V linkcolor=blue \
               -V urlcolor=blue \
               -V lang=zh-CN \
-              --wrap=auto \
-              --toc \
-              -V toc-title="目录" \
+              --wrap=preserve \
               2>&1 | tee pandoc.log
             
-            pandoc_exit=$?
             set -e
             
             # 检查是否生成PDF
-            if [ -f "pdf_output/$dir_name/$base_name.pdf" ]; then
+            if [ -f "pdf_output/$dir_name/$base_name.pdf" ] && [ -s "pdf_output/$dir_name/$base_name.pdf" ]; then
               file_size=$(du -h "pdf_output/$dir_name/$base_name.pdf" | cut -f1)
               
-              # 检查PDF是否包含有效内容
-              pdf_info=$(pdfinfo "pdf_output/$dir_name/$base_name.pdf" 2>/dev/null || echo "")
-              if [ -n "$pdf_info" ]; then
+              # 检查文件头部是否有效
+              if file "pdf_output/$dir_name/$base_name.pdf" | grep -q "PDF document"; then
                 echo "  ✓ 成功: $base_name.pdf ($file_size)"
                 converted_count=$((converted_count + 1))
-                
-                # 检查代码块渲染
-                echo "  代码块设置:"
-                echo "    - 字体: 小号等宽字体"
-                echo "    - 换行: 已启用"
-                echo "    - 行号: 已移除"
-                echo "    - 背景: 浅灰色"
-                echo "    - 边距: 较窄 (1cm)"
               else
-                echo "  ⚠ 警告: PDF文件可能有问题..."
+                echo "  ⚠ 可能有问题: $base_name.pdf ($file_size)"
                 failed_count=$((failed_count + 1))
+                failed_files="$failed_files\n  - $md_file"
               fi
             else
               echo "  ✗ 失败: $md_file"
               failed_count=$((failed_count + 1))
+              failed_files="$failed_files\n  - $md_file"
             fi
           done
           
@@ -255,141 +191,133 @@ jobs:
           echo "转换完成!"
           echo "成功: $converted_count 个文件"
           echo "失败: $failed_count 个文件"
+          
+          if [ $failed_count -gt 0 ]; then
+            echo ""
+            echo "失败的文件:"
+            echo -e "$failed_files"
+          fi
+          
           echo "================================"
           
+          # 如果所有文件都失败，则退出
           if [ $converted_count -eq 0 ] && [ $failed_count -gt 0 ]; then
             echo "错误: 没有成功转换任何文件"
             exit 1
           fi
       
-      - name: Create simple test to verify code blocks
+      - name: "Verify PDF files"
         run: |
-          echo "创建代码块测试文档..."
+          echo "验证PDF文件..."
           
-          cat > code-test.md << 'EOF'
-          # 代码块测试
+          # 安装pdfinfo用于验证PDF
+          sudo apt-get install -y poppler-utils
           
-          测试代码块的自动换行和格式。
+          total_pdfs=$(find pdf_output -name "*.pdf" -type f 2>/dev/null | wc -l)
           
-          ## 长代码行测试
+          if [ $total_pdfs -eq 0 ]; then
+            echo "错误: 没有找到任何PDF文件"
+            exit 1
+          fi
           
-          ```cpp
-          // 这是一个非常长的C++函数声明，用于测试自动换行
-          template<typename T, typename Allocator = std::allocator<T>>
-          std::vector<T, Allocator> process_data(const std::vector<T, Allocator>& input,
-                                                std::function<T(const T&)> transformer = [](const T& x) { return x; },
-                                                bool verbose = false,
-                                                const std::string& log_file = "process.log") {
-              if (verbose) std::cout << "Processing " << input.size() << " elements" << std::endl;
-              std::vector<T, Allocator> result;
-              result.reserve(input.size());
-              for (const auto& item : input) {
-                  result.push_back(transformer(item));
-              }
-              return result;
-          }
+          echo "总计生成 $total_pdfs 个PDF文件"
           
-          // 另一个长行
-          auto result = process_data<int>(input_vector, [](int x) { return x * x; }, true, "/tmp/debug.log");
-          ```
+          # 验证每个PDF文件
+          valid_count=0
+          invalid_files=""
           
-          ```python
-          # 这是一个非常长的Python函数调用，用于测试自动换行
-          result = dataframe.groupby(['category', 'subcategory']).agg({
-              'value1': ['mean', 'std', 'min', 'max'],
-              'value2': ['sum', 'count'],
-              'value3': lambda x: x.quantile(0.75) - x.quantile(0.25)
-          }).reset_index().rename(columns={
-              ('value1', 'mean'): 'value1_mean',
-              ('value1', 'std'): 'value1_std',
-              ('value1', 'min'): 'value1_min',
-              ('value1', 'max'): 'value1_max',
-              ('value2', 'sum'): 'value2_sum',
-              ('value2', 'count'): 'value2_count'
-          })
+          find pdf_output -name "*.pdf" -type f | sort | while read pdf_file; do
+            size=$(du -h "$pdf_file" | cut -f1)
+            
+            # 使用pdfinfo验证PDF
+            if pdfinfo "$pdf_file" >/dev/null 2>&1; then
+              echo "  ✓ 有效: $pdf_file ($size)"
+              valid_count=$((valid_count + 1))
+            else
+              echo "  ✗ 无效: $pdf_file ($size)"
+              invalid_files="$invalid_files\n  - $pdf_file"
+            fi
+          done
           
-          # 长字符串测试
-          long_url = "https://api.example.com/v1/users/12345/orders?status=completed&start_date=2023-01-01&end_date=2023-12-31&include_details=true&format=json"
-          ```
+          echo ""
+          echo "有效PDF文件: $valid_count"
           
-          ```bash
-          # 这是一个非常长的Bash命令
-          docker run -d --name myapp --restart unless-stopped -p 80:80 -p 443:443 -v /etc/ssl/certs:/etc/ssl/certs -v /var/log/myapp:/var/log -e DB_HOST=postgres.example.com -e DB_PORT=5432 -e DB_NAME=mydb -e DB_USER=myuser -e DB_PASSWORD=mysecretpassword myapp:latest
-          ```
-          
-          ## 中文注释测试
-          
-          ```javascript
-          // 中文注释：这是一个非常长的函数调用，用于测试代码块中的中文支持
-          const result = await fetch('/api/v1/data', {
-              method: 'POST',
-              headers: {
-                  'Content-Type': 'application/json',
-                  'Authorization': `Bearer ${localStorage.getItem('token')}`,
-                  'X-Request-ID': uuidv4()
-              },
-              body: JSON.stringify({
-                  filters: {
-                      status: ['active', 'pending'],
-                      date_range: { start: '2023-01-01', end: '2023-12-31' },
-                      categories: ['electronics', 'books', 'clothing']
-                  },
-                  pagination: { page: 1, page_size: 50 },
-                  sort: { field: 'created_at', order: 'desc' }
-              })
-          }).then(response => response.json()).catch(error => {
-              console.error('API调用失败:', error);
-              return null;
-          });
-          ```
-          
-          ## 短代码测试
-          
-          ```cpp
-          int main() {
-              return 0;
-          }
-          ```
-          
-          ```python
-          print("Hello, World!")
-          ```
-          EOF
-          
-          # 转换测试文档
-          pandoc code-test.md \
-            -o pdf_output/code-test.pdf \
-            --pdf-engine=xelatex \
-            --listings \
-            -H chinese-template.tex \
-            -V mainfont="Noto Serif CJK SC" \
-            -V sansfont="Noto Sans CJK SC" \
-            -V monofont="Noto Sans Mono CJK SC" \
-            -V geometry:"top=1.5cm, bottom=1.5cm, left=1cm, right=1cm" \
-            -V colorlinks=true \
-            -V linkcolor=blue \
-            -V urlcolor=blue \
-            -V lang=zh-CN \
-            --wrap=auto
-          
-          if [ -f "pdf_output/code-test.pdf" ]; then
-            echo "✓ 代码测试文档生成成功"
-            echo "请检查 pdf_output/code-test.pdf 中的代码块"
-          else
-            echo "✗ 代码测试文档生成失败"
+          if [ -n "$invalid_files" ]; then
+            echo "无效的PDF文件:"
+            echo -e "$invalid_files"
           fi
       
-      # 以下步骤保持不变（release创建等）
-      - name: Create release documentation
+      - name: "Create release documentation"
         run: |
-          # ...（保持不变）
+          echo "创建发布文档..."
+          
+          # 获取 tag 名称（如果有）
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            TAG_NAME="${GITHUB_REF#refs/tags/}"
+          else
+            TAG_NAME="latest"
+          fi
+          
+          # 创建 README
+          echo "# PDF 文档集" > pdf_output/README.md
+          echo "" >> pdf_output/README.md
+          echo "## 生成信息" >> pdf_output/README.md
+          echo "- **生成时间**: $(date '+%Y-%m-%d %H:%M:%S')" >> pdf_output/README.md
+          echo "- **GitHub SHA**: ${{ github.sha }}" >> pdf_output/README.md
+          echo "- **触发事件**: ${{ github.event_name }}" >> pdf_output/README.md
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            echo "- **标签**: $TAG_NAME" >> pdf_output/README.md
+          fi
+          echo "- **代码块样式**: 使用带边框的代码框" >> pdf_output/README.md
+          echo "- **页面边距**: 1英寸边距" >> pdf_output/README.md
+          echo "" >> pdf_output/README.md
+          
+          echo "## 文件列表" >> pdf_output/README.md
+          echo "" >> pdf_output/README.md
+          
+          # 统计文件数量
+          PDF_COUNT=$(find pdf_output -name "*.pdf" -type f 2>/dev/null | wc -l)
+          
+          # 按目录组织文件列表
+          current_dir=""
+          find pdf_output -name "*.pdf" -type f | sort | while read pdf_file; do
+            rel_path=${pdf_file#pdf_output/}
+            dir_name=$(dirname "$rel_path")
+            file_name=$(basename "$rel_path")
+            file_size=$(du -h "$pdf_file" | cut -f1)
+            
+            # 如果是新的目录，添加标题
+            if [ "$current_dir" != "$dir_name" ]; then
+              current_dir="$dir_name"
+              if [ "$dir_name" != "." ]; then
+                echo "### $dir_name/" >> pdf_output/README.md
+                echo "" >> pdf_output/README.md
+              fi
+            fi
+            
+            echo "- [$file_name]($rel_path) ($file_size)" >> pdf_output/README.md
+          done
+          
+          echo "" >> pdf_output/README.md
+          echo "**总计: $PDF_COUNT 个 PDF 文件**" >> pdf_output/README.md
       
-      - name: Create zip archive for release
+      - name: "Create zip archive for release"
         if: startsWith(github.ref, 'refs/tags/')
         run: |
-          # ...（保持不变）
+          echo "为 GitHub Releases 创建压缩包..."
+          
+          # 获取 tag 名称
+          TAG_NAME="${GITHUB_REF#refs/tags/}"
+          
+          # 创建压缩包
+          cd pdf_output
+          zip -r "../pdf-documents-$TAG_NAME.zip" .
+          cd ..
+          
+          echo "压缩包已创建: pdf-documents-$TAG_NAME.zip"
+          ls -lh pdf-documents-*.zip
       
-      - name: Upload PDF artifacts
+      - name: "Upload PDF artifacts"
         uses: actions/upload-artifact@v4
         with:
           name: pdf-documents
@@ -398,29 +326,22 @@ jobs:
             pdf-documents-*.zip
           retention-days: 7
       
-      - name: Create GitHub Release
+      - name: "Create GitHub Release"
         if: startsWith(github.ref, 'refs/tags/')
         id: create_release
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ github.ref_name }}
           name: "PDF Documents - ${{ github.ref_name }}"
-          body_path: pdf_output/RELEASE_NOTES.md
+          body_path: pdf_output/README.md
           files: |
             pdf-documents-${{ github.ref_name }}.zip
           draft: false
-          prerevention: false
+          prerelease: false
           generate_release_notes: true
       
-      - name: Verify release creation
+      - name: "Verify release creation"
         if: startsWith(github.ref, 'refs/tags/')
         run: |
           echo "Release 创建完成!"
-          echo "主要改进:"
-          echo "1. 代码块使用小字体 (footnotesize)"
-          echo "2. 强制自动换行 (breaklines=true)"
-          echo "3. 较窄的页边距 (1cm)"
-          echo "4. 浅灰色背景 (gray!3)"
-          echo "5. 换行指示符 (→)"
-          echo ""
-          echo "如果仍有长代码超出边界，建议在源Markdown中手动换行。"
+          echo "访问: https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }}"
