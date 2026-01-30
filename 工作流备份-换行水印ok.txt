@@ -123,7 +123,7 @@ jobs:
               \node at (page center) [
                 rotate=45,
                 scale=8,
-                text=gray!30,  % 浅灰色，透明度85%
+                text=gray!15,  % 浅灰色，透明度85%
                 opacity=0.7,
                 font=\sffamily\bfseries
               ] {emakefun};
@@ -180,6 +180,10 @@ jobs:
             md_dir=$(dirname "$md_file")
             
             # 复制资源文件
+            if [ -d "$dir_name/picture" ]; then
+              mkdir -p "pdf_output/$dir_name/picture"
+              find "$dir_name/picture" -type f \( -name "*.png" -o -name "*.jpg" -o -name "*.jpeg" \) -exec cp {} "pdf_output/$dir_name/picture/" 2>/dev/null \; || true
+            fi
             
             if [ -d "$dir_name/resource" ]; then
               mkdir -p "pdf_output/$dir_name/resource"
