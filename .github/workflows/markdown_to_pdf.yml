@@ -34,41 +34,40 @@ jobs:
             texlive-latex-recommended \
             texlive-lang-chinese \
             fonts-noto-cjk \
+            fonts-noto-cjk-extra \
             fonts-wqy-microhei \
             fonts-wqy-zenhei \
-            fonts-arphic-uming \
             lmodern \
             tree \
             jq
       
+      - name: "Verify font installation"
+        run: |
+          echo "检查已安装的字体..."
+          fc-list :lang=zh | head -20
+          echo "Noto CJK 字体:"
+          fc-list | grep -i "noto.*cjk" | head -10
+      
       - name: "Create LaTeX template"
         run: |
-          # 创建改进的模板，包含防止代码超出的设置
+          # 创建简化的模板，使用系统自动查找字体
           cat > header.tex << 'EOF'
-          % 中文支持 - 使用更全面的字体设置
+          % 中文支持 - 使用简单可靠的设置
           \usepackage{xeCJK}
           \usepackage[UTF8]{ctex}
           
-          % 设置中文字体，优先使用系统字体
-          \setCJKmainfont[
-            Path = /usr/share/fonts/truetype/noto/,
-            Extension = .ttf,
-            BoldFont = NotoSerifCJKsc-Bold,
-            ItalicFont = NotoSerifCJKsc-Light
-          ]{NotoSerifCJKsc-Regular}
+          % 简单设置中文字体，让系统自动查找
+          \setCJKmainfont{Noto Serif CJK SC}
+          \setCJKsansfont{Noto Sans CJK SC}
+          \setCJKmonofont{Noto Sans Mono CJK SC}
           
-          \setCJKsansfont[
-            Path = /usr/share/fonts/truetype/noto/,
-            Extension = .ttf,
-            BoldFont = NotoSansCJKsc-Bold
-          ]{NotoSansCJKsc-Regular}
+          % 如果上述字体不可用，使用备用字体
+          \setCJKfamilyfont{zhsong}{Noto Serif CJK SC}
+          \setCJKfamilyfont{zhhei}{Noto Sans CJK SC}
+          \setCJKfamilyfont{zhkai}{AR PL UKai CN}
+          \setCJKfamilyfont{zhfs}{AR PL UMing CN}
           
-          \setCJKmonofont[
-            Path = /usr/share/fonts/truetype/noto/,
-            Extension = .ttf
-          ]{NotoSansMonoCJKsc-Regular}
-          
-          % 页面设置 - 增加边距
+          % 页面设置 - 使用中等边距
           \usepackage[margin=1.2in]{geometry}
           
           % 超链接
@@ -88,6 +87,9 @@ jobs:
           % 定义颜色
           \definecolor{codebg}{rgb}{0.98,0.98,0.98}
           \definecolor{framecolor}{rgb}{0.8,0.8,0.8}
+          \definecolor{keywordcolor}{rgb}{0,0,1}
+          \definecolor{commentcolor}{rgb}{0,0.5,0}
+          \definecolor{stringcolor}{rgb}{0.64,0.08,0.08}
           
           % 改进的代码块设置
           \lstset{
@@ -107,14 +109,33 @@ jobs:
             numbers=none,
             xleftmargin=12pt,
             xrightmargin=12pt,
-            escapeinside={\%*}{*)},  % 允许在代码中插入LaTeX
             upquote=true,  % 正确处理引号
             columns=fullflexible,  % 更好的字符间距
             keepspaces=true,  % 保持空格
-            literate=  % 处理特殊字符
-              {=}{{\texttt{=}}}1
-              {-}{{\texttt{-}}}1
-              {+}{{\texttt{+}}}1
+            keywordstyle=\color{keywordcolor}\bfseries,
+            commentstyle=\color{commentcolor}\itshape,
+            stringstyle=\color{stringcolor},
+          }
+          
+          % C++ 代码样式
+          \lstdefinelanguage{C++}{
+            keywords={alignas, alignof, and, and_eq, asm, auto, bitand, bitor, bool,
+              break, case, catch, char, char8_t, char16_t, char32_t, class,
+              compl, concept, const, consteval, constexpr, const_cast, continue,
+              co_await, co_return, co_yield, decltype, default, delete, do,
+              double, dynamic_cast, else, enum, explicit, export, extern, false,
+              float, for, friend, goto, if, inline, int, long, mutable, namespace,
+              new, noexcept, not, not_eq, nullptr, operator, or, or_eq, private,
+              protected, public, register, reinterpret_cast, requires, return,
+              short, signed, sizeof, static, static_assert, static_cast, struct,
+              switch, template, this, thread_local, throw, true, try, typedef,
+              typeid, typename, union, unsigned, using, virtual, void, volatile,
+              wchar_t, while, xor, xor_eq},
+            sensitive=true,
+            morecomment=[l]{//},
+            morecomment=[s]{/*}{*/},
+            morestring=[b]",
+            morestring=[b]'
           }
           
           % 处理过长的等号和连字符
@@ -128,11 +149,6 @@ jobs:
           % 防止溢出
           \sloppy
           \emergencystretch=3em
-          
-          % 改进的代码环境
-          \lstnewenvironment{codeblock}[1][]
-            {\lstset{#1}}
-            {}
           EOF
       
       - name: "Set up output directory"
@@ -181,7 +197,9 @@ jobs:
             # 转换Markdown为PDF
             set +e
             
-            # 方法1：使用listings，带边框和自动换行
+            echo "使用简化方法转换..."
+            
+            # 简化转换方法，避免复杂的字体设置
             pandoc "$md_file" \
               --resource-path="$md_dir:.:." \
               -o "pdf_output/$dir_name/$base_name.pdf" \
@@ -308,8 +326,8 @@ jobs:
           fi
           echo "- **代码块样式**: 使用带边框的代码框，自动换行" >> pdf_output/README.md
           echo "- **页面边距**: 1.2英寸边距，防止内容溢出" >> pdf_output/README.md
-          echo "- **中文字体**: 使用Noto CJK字体，优化中文显示" >> pdf_output/README.md
-          echo "- **改进功能**: 修复长行代码超出边界的问题" >> pdf_output/README.md
+          echo "- **中文字体**: 使用Noto CJK字体" >> pdf_output/README.md
+          echo "- **改进功能**: 修复字体问题，优化代码显示" >> pdf_output/README.md
           echo "" >> pdf_output/README.md
           
           echo "## 文件列表" >> pdf_output/README.md
