@@ -1,4 +1,4 @@
-name: "Markdown to PDF Converter with Watermark"
+name: "Markdown to PDF Converter with Tiled Watermark"
 
 on:
   push:
@@ -41,9 +41,9 @@ jobs:
             tree \
             jq
       
-      - name: "Create LaTeX template with watermark"
+      - name: "Create LaTeX template with tiled watermark"
         run: |
-          # 创建包含水印的模板
+          # 创建包含平铺水印的模板
           cat > header.tex << 'EOF'
           % 中文支持
           \usepackage{xeCJK}
@@ -107,39 +107,57 @@ jobs:
           \sloppy
           \emergencystretch=3em
           
-          % ========== 水印设置 ==========
+          % ========== 平铺水印设置 ==========
           % 使用 eso-pic 包添加水印
           \usepackage{eso-pic}
           \usepackage{tikz}
           \usetikzlibrary{calc}
           
-          % 定义水印命令
+          % 定义水印命令 - 平铺效果
           \newcommand\BackgroundPicture{%
             \begin{tikzpicture}[remember picture,overlay]
-              % 计算页面中心
+              % 计算页面尺寸
               \coordinate (page center) at (current page.center);
+              \pgfmathsetmacro{\pagewidth}{\paperwidth}
+              \pgfmathsetmacro{\pageheight}{\paperheight}
               
-              % 水印文字 - 放置在页面中心
-              \node at (page center) [
-                rotate=45,
-                scale=8,
-                text=gray!30,  % 浅灰色，透明度85%
-                opacity=0.7,
-                font=\sffamily\bfseries
-              ] {emakefun};
+              % 平铺水印设置
+              % 水平方向数量
+              \pgfmathsetmacro{\hcount}{5}
+              % 垂直方向数量
+              \pgfmathsetmacro{\vcount}{7}
+              % 水平间距
+              \pgfmathsetmacro{\hspace}{\paperwidth/(\hcount+1)}
+              % 垂直间距
+              \pgfmathsetmacro{\vspace}{\paperheight/(\vcount+1)}
               
-              % 可选：添加多个水印重复平铺
-              \foreach \x in {-1,0,1} {
-                \foreach \y in {-1,0,1} {
-                  \node at ($(page center)+(\x*0.3\paperwidth,\y*0.3\paperheight)$) [
-                    rotate=45,
-                    scale=6,
-                    text=gray!10,
-                    opacity=0.5,
-                    font=\sffamily\bfseries
+              % 创建平铺水印网格
+              \foreach \i in {1,...,\hcount} {
+                \foreach \j in {1,...,\vcount} {
+                  % 计算水印位置
+                  \pgfmathsetmacro{\x}{-\paperwidth/2 + \i*\hspace}
+                  \pgfmathsetmacro{\y}{-\paperheight/2 + \j*\vspace}
+                  
+                  % 绘制水印 - 更小更透明
+                  \node at ($(page center) + (\x pt, \y pt)$) [
+                    rotate=30,  % 30度旋转
+                    scale=1.8,  % 更小的缩放比例
+                    text=gray!27,  % 更浅的灰色
+                    opacity=0.4,  % 更高的透明度
+                    font=\sffamily\bfseries\small
                   ] {emakefun};
                 }
               }
+              
+              % 可选：添加中心水印（更明显一些）
+              \node at (page center) [
+                rotate=30,
+                scale=3,
+                text=gray!12,
+                opacity=0.6,
+                font=\sffamily\bfseries
+              ] {emakefun};
+              
             \end{tikzpicture}%
           }
           
@@ -151,9 +169,9 @@ jobs:
         run: |
           mkdir -p pdf_output
       
-      - name: "Convert Markdown to PDF with watermark"
+      - name: "Convert Markdown to PDF with tiled watermark"
         run: |
-          echo "开始转换Markdown文件到PDF（带水印）..."
+          echo "开始转换Markdown文件到PDF（带平铺水印）..."
           
           # 查找所有md文件
           MD_FILES=$(find . -name "*.md" -not -path "./.*" -not -path "*/node_modules/*" | sed 's/^\.\///')
@@ -180,6 +198,10 @@ jobs:
             md_dir=$(dirname "$md_file")
             
             # 复制资源文件
+            if [ -d "$dir_name/picture" ]; then
+              mkdir -p "pdf_output/$dir_name/picture"
+              find "$dir_name/picture" -type f \( -name "*.png" -o -name "*.jpg" -o -name "*.jpeg" \) -exec cp {} "pdf_output/$dir_name/picture/" 2>/dev/null \; || true
+            fi
             
             if [ -d "$dir_name/resource" ]; then
               mkdir -p "pdf_output/$dir_name/resource"
@@ -217,16 +239,8 @@ jobs:
               
               # 检查文件头部是否有效
               if file "pdf_output/$dir_name/$base_name.pdf" | grep -q "PDF document"; then
-                echo "  ✓ 成功: $base_name.pdf ($file_size) [带水印]"
+                echo "  ✓ 成功: $base_name.pdf ($file_size) [带平铺水印]"
                 converted_count=$((converted_count + 1))
-                
-                # 验证水印是否添加成功（可选）
-                echo "    正在验证水印..."
-                if pdftotext "pdf_output/$dir_name/$base_name.pdf" - 2>/dev/null | grep -i "emakefun" >/dev/null; then
-                  echo "    ✓ 水印验证成功"
-                else
-                  echo "    ⚠ 水印可能未正确添加"
-                fi
               else
                 echo "  ⚠ 可能有问题: $base_name.pdf ($file_size)"
                 failed_count=$((failed_count + 1))
@@ -259,9 +273,65 @@ jobs:
             exit 1
           fi
       
+      - name: "Create sample PDF for verification"
+        run: |
+          echo "创建水印效果预览样本..."
+          
+          # 创建一个简单的Markdown文件来测试水印效果
+          cat > watermark_test.md << 'EOF'
+          # 水印效果测试文档
+          
+          此文档用于测试平铺水印效果。
+          
+          ## 代码示例
+          
+          ```cpp
+          #include <iostream>
+          
+          int main() {
+              std::cout << "Hello, World!" << std::endl;
+              return 0;
+          }
+          ```
+          
+          ## 表格示例
+          
+          | 项目 | 描述 | 状态 |
+          |------|------|------|
+          | A | 测试项目A | 完成 |
+          | B | 测试项目B | 进行中 |
+          | C | 测试项目C | 待开始 |
+          
+          ## 图片示例
+          
+          ![示例图片](https://via.placeholder.com/400x200)
+          
+          *文档生成时间: $(date)*
+          EOF
+          
+          # 转换测试文件
+          pandoc watermark_test.md \
+            -o pdf_output/watermark_sample.pdf \
+            --pdf-engine=xelatex \
+            --listings \
+            --include-in-header=header.tex \
+            -V mainfont="Noto Serif CJK SC" \
+            -V sansfont="Noto Sans CJK SC" \
+            -V monofont="Noto Sans Mono CJK SC" \
+            -V geometry:margin=1.2in \
+            -V colorlinks=true \
+            -V linkcolor=blue \
+            -V urlcolor=blue \
+            -V lang=zh-CN \
+            --wrap=auto \
+            --highlight-style=tango
+          
+          echo "水印样本已创建: pdf_output/watermark_sample.pdf"
+          ls -lh pdf_output/watermark_sample.pdf
+      
       - name: "Verify PDF files"
         run: |
-          echo "验证PDF文件和水印..."
+          echo "验证PDF文件..."
           
           # 安装pdfinfo用于验证PDF
           sudo apt-get install -y poppler-utils
@@ -273,7 +343,10 @@ jobs:
             exit 1
           fi
           
-          echo "总计生成 $total_pdfs 个PDF文件（带水印）"
+          echo "总计生成 $total_pdfs 个PDF文件（带平铺水印）"
+          echo ""
+          echo "水印效果预览: pdf_output/watermark_sample.pdf"
+          echo ""
           
           # 验证每个PDF文件
           valid_count=0
@@ -312,7 +385,7 @@ jobs:
           fi
           
           # 创建 README
-          echo "# PDF 文档集（带水印）" > pdf_output/README.md
+          echo "# PDF 文档集（带平铺水印）" > pdf_output/README.md
           echo "" >> pdf_output/README.md
           echo "## 生成信息" >> pdf_output/README.md
           echo "- **生成时间**: $(date '+%Y-%m-%d %H:%M:%S')" >> pdf_output/README.md
@@ -323,8 +396,14 @@ jobs:
           fi
           echo "- **代码块样式**: 使用带边框的代码框，自动换行" >> pdf_output/README.md
           echo "- **页面边距**: 1.2英寸边距，防止内容溢出" >> pdf_output/README.md
-          echo "- **水印设置**: 每页添加 'emakefun' 水印，防止盗用" >> pdf_output/README.md
-          echo "- **水印样式**: 45度旋转，浅灰色，透明度85%" >> pdf_output/README.md
+          echo "- **水印设置**: 平铺 'emakefun' 水印，防止盗用" >> pdf_output/README.md
+          echo "- **水印样式**: 5x7网格平铺，30度旋转，浅灰色，透明度60%" >> pdf_output/README.md
+          echo "- **水印大小**: 小尺寸水印，不影响正文阅读" >> pdf_output/README.md
+          echo "" >> pdf_output/README.md
+          
+          echo "## 水印效果预览" >> pdf_output/README.md
+          echo "" >> pdf_output/README.md
+          echo "查看水印效果样本: [watermark_sample.pdf](watermark_sample.pdf)" >> pdf_output/README.md
           echo "" >> pdf_output/README.md
           
           echo "## 文件列表" >> pdf_output/README.md
@@ -354,7 +433,9 @@ jobs:
           done
           
           echo "" >> pdf_output/README.md
-          echo "**总计: $PDF_COUNT 个 PDF 文件（均带水印）**" >> pdf_output/README.md
+          echo "**总计: $PDF_COUNT 个 PDF 文件（均带平铺水印）**" >> pdf_output/README.md
+          echo "" >> pdf_output/README.md
+          echo "**注**: 所有PDF文件已添加平铺式 'emakefun' 水印以防止未经授权的使用。" >> pdf_output/README.md
       
       - name: "Create zip archive for release"
         if: startsWith(github.ref, 'refs/tags/')
@@ -375,7 +456,7 @@ jobs:
       - name: "Upload PDF artifacts"
         uses: actions/upload-artifact@v4
         with:
-          name: pdf-documents-with-watermark
+          name: pdf-documents-with-tiled-watermark
           path: |
             pdf_output/
             pdf-documents-*.zip
@@ -387,7 +468,7 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ github.ref_name }}
-          name: "PDF Documents with Watermark - ${{ github.ref_name }}"
+          name: "PDF Documents with Tiled Watermark - ${{ github.ref_name }}"
           body_path: pdf_output/README.md
           files: |
             pdf-documents-${{ github.ref_name }}.zip
@@ -404,6 +485,8 @@ jobs:
           echo "主要功能:"
           echo "1. 代码块带边框，自动换行"
           echo "2. 优化页面边距，防止内容溢出"
-          echo "3. 添加 'emakefun' 水印防止盗用"
-          echo "4. 水印样式：45度旋转，浅灰色，透明度85%"
-          echo "5. 中文字体优化显示"
+          echo "3. 添加平铺式 'emakefun' 水印"
+          echo "4. 水印网格: 5列 × 7行"
+          echo "5. 水印样式: 30度旋转，浅灰色，透明度60%"
+          echo "6. 水印大小: 小尺寸，不影响阅读"
+          echo "7. 包含水印效果预览样本"
