@@ -1,4 +1,4 @@
-name: "Markdown to PDF Converter with Tiled Watermark and Enhanced Support"
+name: "Markdown to PDF Converter with Tiled Watermark"
 
 on:
   push:
@@ -39,7 +39,11 @@ jobs:
             fonts-wqy-zenhei \
             lmodern \
             tree \
-            jq
+            jq \
+            python3-pip
+          
+          # 安装Python包用于HTML标签处理
+          pip3 install beautifulsoup4 html2text
       
       - name: "Create LaTeX template"
         run: |
@@ -52,29 +56,18 @@ jobs:
           
           \usepackage[margin=1.2in]{geometry}
           
-          % ===== 增强的图片和链接支持 =====
-          \usepackage{graphicx}
-          \usepackage[export]{adjustbox}
           \usepackage{hyperref}
-          
           \hypersetup{
             colorlinks=true,
             linkcolor=blue,
-            urlcolor=blue!80!black,
+            urlcolor=blue,
             citecolor=blue,
-            filecolor=blue!80!black,
             pdfborder={0 0 0},
-            pdftitle={emakefun 文档},
-            pdfauthor={emakefun},
-            pdfkeywords={Arduino, Maker, Education},
-            pdfcreator={Pandoc with emakefun template},
           }
-          
-          \graphicspath{{./}{./picture/}{./resource/}}
-          % ================================
           
           \usepackage{listings}
           \usepackage{xcolor}
+          \usepackage{graphicx}
           
           \definecolor{codebg}{rgb}{0.98,0.98,0.98}
           \definecolor{framecolor}{rgb}{0.8,0.8,0.8}
@@ -149,7 +142,109 @@ jobs:
           }
           
           \AddToShipoutPictureBG{\BackgroundPicture}
+          
+          % 处理HTML img标签，使其能正确显示图片
+          \usepackage{xparse}
+          \usepackage{adjustbox}
+          
+          % 重定义\href以支持内联链接
+          \let\oldhref\href
+          \renewcommand{\href}[2]{\oldhref{#1}{#2}}
+          
+          % 确保图片可以正确加载
+          \graphicspath{{./}{./picture/}{./resource/}}
+          
+          % 允许在markdown中使用raw_html
+          \usepackage{float}
+          
+          % 设置图片最大宽度
+          \setkeys{Gin}{max width=\linewidth, max height=0.8\textheight, keepaspectratio}
           EOF
+      
+      - name: "Preprocess HTML tags in Markdown"
+        run: |
+          cat > preprocess_html.py << 'EOF'
+          import os
+          import re
+          import sys
+          from bs4 import BeautifulSoup
+          
+          def process_html_tags(content):
+              # 处理 <img> 标签
+              img_pattern = re.compile(r'<img\s+([^>]+)>', re.IGNORECASE)
+              
+              def replace_img(match):
+                  attrs_str = match.group(1)
+                  attrs = {}
+                  for attr in re.findall(r'(\w+)\s*=\s*"([^"]*)"', attrs_str):
+                      attrs[attr[0]] = attr[1]
+                  
+                  src = attrs.get('src', '')
+                  alt = attrs.get('alt', '')
+                  width = attrs.get('width', '')
+                  
+                  if width:
+                      return f'![{alt}]({src}){{ width={width} }}'
+                  else:
+                      return f'![{alt}]({src})'
+              
+              content = img_pattern.sub(replace_img, content)
+              
+              # 处理 <center> 标签
+              content = re.sub(r'<center>(.*?)</center>', r'\\begin{center}\n\1\n\\end{center}', content, flags=re.DOTALL)
+              
+              # 处理 <a> 标签
+              a_pattern = re.compile(r'<a\s+([^>]+)>(.*?)</a>', re.IGNORECASE | re.DOTALL)
+              
+              def replace_a(match):
+                  attrs_str = match.group(1)
+                  text = match.group(2).strip()
+                  attrs = {}
+                  for attr in re.findall(r'(\w+)\s*=\s*"([^"]*)"', attrs_str):
+                      attrs[attr[0]] = attr[1]
+                  
+                  href = attrs.get('href', '#')
+                  if 'target="_blank"' in attrs_str:
+                      return f'[{text}]({href}){{target="_blank"}}'
+                  return f'[{text}]({href})'
+              
+              content = a_pattern.sub(replace_a, content)
+              
+              # 处理表格中的HTML
+              content = re.sub(r'<table>', r'\begin{table}[H]\n\centering\n\begin{tabular}', content)
+              content = re.sub(r'</table>', r'\end{tabular}\n\end{table}', content)
+              
+              return content
+          
+          def process_markdown_file(filepath):
+              print(f"Processing: {filepath}")
+              try:
+                  with open(filepath, 'r', encoding='utf-8') as f:
+                      content = f.read()
+                  
+                  # 预处理HTML标签
+                  processed_content = process_html_tags(content)
+                  
+                  # 写回文件
+                  with open(filepath, 'w', encoding='utf-8') as f:
+                      f.write(processed_content)
+                      
+                  print(f"Successfully processed: {filepath}")
+              except Exception as e:
+                  print(f"Error processing {filepath}: {e}")
+          
+          # 遍历所有Markdown文件
+          for root, dirs, files in os.walk('.'):
+              # 跳过.git目录和pdf_output目录
+              dirs[:] = [d for d in dirs if d not in ['.git', 'pdf_output', '__pycache__']]
+              
+              for file in files:
+                  if file.endswith('.md'):
+                      filepath = os.path.join(root, file)
+                      process_markdown_file(filepath)
+          EOF
+          
+          python3 preprocess_html.py
       
       - name: "Set up output directory"
         run: |
@@ -173,13 +268,11 @@ jobs:
             
             md_dir=$(dirname "$md_file")
            
-            # 复制资源文件
             if [ -d "$dir_name/resource" ]; then
               mkdir -p "pdf_output/$dir_name/resource"
               find "$dir_name/resource" -type f -exec cp {} "pdf_output/$dir_name/resource/" 2>/dev/null \; || true
             fi
             
-            # 复制图片目录
             if [ -d "$dir_name/picture" ]; then
               mkdir -p "pdf_output/$dir_name/picture"
               find "$dir_name/picture" -type f -exec cp {} "pdf_output/$dir_name/picture/" 2>/dev/null \; || true
@@ -187,10 +280,11 @@ jobs:
             
             set +e
             
-            # 使用增强的pandoc命令，支持HTML标签
+            # 构建资源路径
+            resource_paths="$md_dir:.:./picture:./resource"
+            
             pandoc "$md_file" \
-              --from=markdown+raw_html \
-              --resource-path="$md_dir:.:." \
+              --resource-path="$resource_paths" \
               -o "pdf_output/$dir_name/$base_name.pdf" \
               --pdf-engine=xelatex \
               --listings \
@@ -207,17 +301,19 @@ jobs:
               -V papersize=a4 \
               --wrap=auto \
               --highlight-style=tango \
-              2>&1 | tee /tmp/pandoc_output.log
+              --shift-heading-level-by=0 \
+              --extract-media=pdf_output \
+              -f markdown+raw_html+link_attributes \
+              2>&1 > /dev/null
             
             set -e
             
             if [ -f "pdf_output/$dir_name/$base_name.pdf" ] && [ -s "pdf_output/$dir_name/$base_name.pdf" ]; then
               converted_count=$((converted_count + 1))
-              echo "✅ 成功转换: $md_file -> pdf_output/$dir_name/$base_name.pdf"
+              echo "Successfully converted: $md_file"
             else
               failed_count=$((failed_count + 1))
-              echo "❌ 转换失败: $md_file"
-              cat /tmp/pandoc_output.log
+              echo "Failed to convert: $md_file"
             fi
           done
           
@@ -234,12 +330,14 @@ jobs:
           total_pdfs=$(find pdf_output -name "*.pdf" -type f 2>/dev/null | wc -l)
           
           if [ $total_pdfs -eq 0 ]; then
-            echo "错误: 没有生成PDF文件"
+            echo "No PDF files generated!"
             exit 1
+          else
+            echo "Total PDF files generated: $total_pdfs"
+            
+            # 检查PDF文件大小
+            find pdf_output -name "*.pdf" -type f -exec ls -lh {} \;
           fi
-          
-          echo "找到 $total_pdfs 个PDF文件:"
-          find pdf_output -name "*.pdf" -type f | sort
       
       - name: "Create release documentation"
         run: |
@@ -252,9 +350,9 @@ jobs:
           echo "# PDF 文档集" > pdf_output/README.md
           echo "" >> pdf_output/README.md
           echo "生成时间: $(date '+%Y-%m-%d %H:%M:%S')" >> pdf_output/README.md
+          echo "已解决HTML标签转换问题，支持图片和链接的正确显示" >> pdf_output/README.md
           echo "代码块带边框，自动换行" >> pdf_output/README.md
           echo "添加平铺式 'emakefun' 水印" >> pdf_output/README.md
-          echo "支持HTML图片和链接标签" >> pdf_output/README.md
           echo "" >> pdf_output/README.md
           
           echo "## 文件列表" >> pdf_output/README.md
