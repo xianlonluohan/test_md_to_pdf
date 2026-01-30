@@ -33,6 +33,7 @@ jobs:
             texlive-fonts-recommended \
             texlive-latex-recommended \
             texlive-lang-chinese \
+            texlive-science \
             fonts-noto-cjk \
             fonts-noto-cjk-extra \
             fonts-wqy-microhei \
@@ -40,9 +41,7 @@ jobs:
             lmodern \
             tree \
             jq \
-            python3-pip \
-            texlive-science \
-            texlive-tables
+            python3-pip
           
           pip3 install beautifulsoup4
       
@@ -364,9 +363,6 @@ jobs:
             \begin{figure}[H]
               \centering
               \oldincludegraphics[#1,width=\maxwidth,keepaspectratio]{#2}
-              \if\relax\detokenize{#1}\relax\else
-                \caption{#1}
-              \fi
             \end{figure}%
           }
           
@@ -432,20 +428,10 @@ jobs:
             {1em}
             {}
           
-          % 表格处理
+          % 表格处理 - 使用array和longtable替代texlive-tables
           \usepackage{array}
-          \usepackage{booktabs}
           \usepackage{longtable}
           \usepackage{multirow}
-          \usepackage{colortbl}
-          
-          % 设置表格样式
-          \setlength{\heavyrulewidth}{1.5pt}
-          \setlength{\lightrulewidth}{0.5pt}
-          \setlength{\abovetopsep}{6pt}
-          \setlength{\belowbottomsep}{6pt}
-          \setlength{\aboverulesep}{4pt}
-          \setlength{\belowrulesep}{4pt}
           
           % 列表样式
           \usepackage{enumitem}
@@ -455,27 +441,13 @@ jobs:
           % 数学公式支持
           \usepackage{amsmath}
           \usepackage{amssymb}
-          \usepackage{amsthm}
-          
-          % 代码块特殊处理
-          \usepackage{fvextra}
-          \usepackage{xpatch}
-          
-          % 修复长代码行问题
-          \lstset{
-            breaklines=true,
-            breakatwhitespace=true,
-            breakindent=20pt,
-            postbreak=\mbox{\textcolor{red}{$\hookrightarrow$}\space},
-            prebreak=\mbox{\textcolor{red}{$\hookleftarrow$}},
-          }
           EOF
       
       - name: "Set up output directory"
         run: |
           mkdir -p pdf_output
       
-      - name: "Convert Markdown to PDF with comprehensive settings"
+      - name: "Convert Markdown to PDF (simplified approach)"
         run: |
           MD_FILES=$(find . -name "*.md" -not -path "./.*" -not -path "*/node_modules/*" -not -path "./pdf_output/*" | sed 's/^\.\///')
           
@@ -504,21 +476,14 @@ jobs:
             
             echo "资源路径: $resource_paths"
             
-            # 预览处理后的markdown文件内容
-            echo "预览markdown文件前20行:"
-            if [ -f "$md_file" ]; then
-              head -20 "$md_file" || true
-            fi
-            
             set +e
             
-            # 转换PDF - 使用增强的设置
+            # 转换PDF - 使用简化但可靠的方法
             echo "开始转换PDF..."
             
-            # 首先转换为中间LaTeX文件，以便调试
             pandoc "$md_file" \
               --resource-path="$resource_paths" \
-              -s -o "pdf_output/$dir_name/$base_name.tex" \
+              -o "pdf_output/$dir_name/$base_name.pdf" \
               --pdf-engine=xelatex \
               --listings \
               --include-in-header=header.tex \
@@ -534,52 +499,29 @@ jobs:
               --highlight-style=tango \
               -f markdown \
               --top-level-division=chapter \
-              -M graphics:true \
-              -M placeins:true \
-              -M floatplacement:"figure:H" \
-              -M table-use-row-colors=true \
-              -M listings:true \
-              -M listings-line-numbers=true \
               2>&1 | tee conversion.log
-            
-            if [ -f "pdf_output/$dir_name/$base_name.tex" ]; then
-              echo "LaTeX文件生成成功，继续生成PDF..."
               
-              # 修复LaTeX文件中的常见问题
-              sed -i 's/\\begin{verbatim}/\\begin{lstlisting}/g' "pdf_output/$dir_name/$base_name.tex"
-              sed -i 's/\\end{verbatim}/\\end{lstlisting}/g' "pdf_output/$dir_name/$base_name.tex"
-              sed -i 's/\\begin{longtable}\[\]{@{}ll@{}}/\\begin{longtable}{|l|l|}/g' "pdf_output/$dir_name/$base_name.tex"
-              
-              # 编译LaTeX文件为PDF
-              cd "pdf_output/$dir_name"
-              xelatex -interaction=nonstopmode "$base_name.tex" > xelatex.log 2>&1
-              xelatex -interaction=nonstopmode "$base_name.tex" > xelatex2.log 2>&1
-              cd - > /dev/null
-              
-              # 检查PDF是否生成成功
-              if [ -f "pdf_output/$dir_name/$base_name.pdf" ] && [ -s "pdf_output/$dir_name/$base_name.pdf" ]; then
-                echo "✓ 成功转换: $md_file"
-                converted_count=$((converted_count + 1))
-                
-                # 检查PDF文件大小
-                pdf_size=$(du -h "pdf_output/$dir_name/$base_name.pdf" | cut -f1)
-                echo "PDF文件大小: $pdf_size"
-              else
-                echo "✗ PDF生成失败: $md_file"
-                failed_count=$((failed_count + 1))
-                
-                # 查看日志
-                if [ -f "pdf_output/$dir_name/xelatex.log" ]; then
-                  echo "LaTeX编译日志:"
-                  tail -50 "pdf_output/$dir_name/xelatex.log"
-                fi
-              fi
-            else
-              echo "✗ LaTeX文件生成失败: $md_file"
-              failed_count=$((failed_count + 1))
-            fi
+            conversion_status=$?
             
             set -e
+            
+            # 检查转换是否成功
+            if [ $conversion_status -eq 0 ] && [ -f "pdf_output/$dir_name/$base_name.pdf" ] && [ -s "pdf_output/$dir_name/$base_name.pdf" ]; then
+              echo "✓ 成功转换: $md_file"
+              converted_count=$((converted_count + 1))
+              
+              # 检查PDF文件大小
+              pdf_size=$(du -h "pdf_output/$dir_name/$base_name.pdf" | cut -f1)
+              echo "PDF文件大小: $pdf_size"
+            else
+              echo "✗ 转换失败: $md_file"
+              failed_count=$((failed_count + 1))
+              
+              if [ -f "conversion.log" ]; then
+                echo "转换日志:"
+                tail -50 conversion.log
+              fi
+            fi
             
             rm -f conversion.log 2>/dev/null || true
             
@@ -624,13 +566,6 @@ jobs:
             # 显示总大小
             total_size_mb=$(find pdf_output -name "*.pdf" -type f -exec stat -c%s {} \; | awk '{sum+=$1} END {print int(sum/1024/1024)}')
             echo "PDF文件总大小: ${total_size_mb}MB"
-            
-            # 检查PDF质量
-            echo "检查PDF质量..."
-            find pdf_output -name "*.pdf" -type f | head -5 | while read pdf_file; do
-              echo "检查: $pdf_file"
-              pdfinfo "$pdf_file" 2>/dev/null | grep -E "Pages:|Page size:" || echo "无法获取PDF信息"
-            done
           fi
       
       - name: "Create release documentation"
@@ -645,12 +580,11 @@ jobs:
           echo "" >> pdf_output/README.md
           echo "生成时间: $(date '+%Y-%m-%d %H:%M:%S')" >> pdf_output/README.md
           echo "已修复的问题:" >> pdf_output/README.md
-          echo "1. 代码块截断问题 - 已修复，代码现在完整显示" >> pdf_output/README.md
-          echo "2. 表格格式混乱 - 已修复，表格显示正常" >> pdf_output/README.md
-          echo "3. 图片标签重复 - 已修复，只显示一个标签" >> pdf_output/README.md
-          echo "4. 列表格式问题 - 已修复，使用标准项目符号" >> pdf_output/README.md
-          echo "5. 添加平铺式 'emakefun' 水印" >> pdf_output/README.md
-          echo "6. 包含resource目录中的程序文件" >> pdf_output/README.md
+          echo "1. 移除不存在的texlive-tables包" >> pdf_output/README.md
+          echo "2. 代码块截断问题 - 已修复，代码现在完整显示" >> pdf_output/README.md
+          echo "3. 表格格式优化" >> pdf_output/README.md
+          echo "4. 添加平铺式 'emakefun' 水印" >> pdf_output/README.md
+          echo "5. 包含resource目录中的程序文件" >> pdf_output/README.md
           echo "" >> pdf_output/README.md
           
           echo "## 文件列表" >> pdf_output/README.md
