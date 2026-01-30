@@ -33,6 +33,7 @@ jobs:
             texlive-fonts-recommended \
             texlive-latex-recommended \
             texlive-lang-chinese \
+            texlive-luatex \
             fonts-noto-cjk \
             fonts-noto-cjk-extra \
             fonts-wqy-microhei \
@@ -40,8 +41,10 @@ jobs:
             lmodern \
             tree \
             jq \
-            python3-pip
-          
+            python3-pip \
+            librsvg2-bin \
+            poppler-utils
+            
           # 安装Python包用于HTML标签处理
           pip3 install beautifulsoup4 html2text
       
@@ -68,6 +71,7 @@ jobs:
           \usepackage{listings}
           \usepackage{xcolor}
           \usepackage{graphicx}
+          \usepackage{float}
           
           \definecolor{codebg}{rgb}{0.98,0.98,0.98}
           \definecolor{framecolor}{rgb}{0.8,0.8,0.8}
@@ -143,22 +147,44 @@ jobs:
           
           \AddToShipoutPictureBG{\BackgroundPicture}
           
-          % 处理HTML img标签，使其能正确显示图片
+          % 设置图片路径
+          \graphicspath{{./}{./picture/}{./resource/}{./images/}}
+          
+          % 设置图片最大宽度为行宽，高度自动调整
+          \makeatletter
+          \def\maxwidth{\ifdim\Gin@nat@width>\linewidth\linewidth\else\Gin@nat@width\fi}
+          \def\maxheight{\ifdim\Gin@nat@height>0.8\textheight0.8\textheight\else\Gin@nat@height\fi}
+          \makeatother
+          
+          % 设置图片默认处理方式
+          \let\oldincludegraphics\includegraphics
+          \renewcommand{\includegraphics}[2][]{%
+            \oldincludegraphics[#1,width=\maxwidth,height=\maxheight,keepaspectratio]{#2}%
+          }
+          
+          % 处理HTML img标签
+          \usepackage{caption}
+          \captionsetup{font=small, labelfont=bf}
+          
+          % 创建自定义命令来处理带宽度的图片
+          \newcommand{\includegraphicswithwidth}[3][]{%
+            \includegraphics[#1,width=#2\linewidth,keepaspectratio]{#3}%
+          }
+          
+          % 处理markdown中的图片属性
           \usepackage{xparse}
-          \usepackage{adjustbox}
-          
-          % 重定义\href以支持内联链接
-          \let\oldhref\href
-          \renewcommand{\href}[2]{\oldhref{#1}{#2}}
-          
-          % 确保图片可以正确加载
-          \graphicspath{{./}{./picture/}{./resource/}}
-          
-          % 允许在markdown中使用raw_html
-          \usepackage{float}
-          
-          % 设置图片最大宽度
-          \setkeys{Gin}{max width=\linewidth, max height=0.8\textheight, keepaspectratio}
+          \NewDocumentCommand{\includegraphicswithattrs}{m O{} O{} O{} O{}}{%
+            \begin{figure}[H]
+              \centering
+              \IfValueTF{#2}{%
+                \includegraphics[width=#2\linewidth,keepaspectratio]{#1}%
+              }{%
+                \includegraphics[width=0.8\linewidth,keepaspectratio]{#1}%
+              }
+              \IfValueTF{#3}{\caption{#3}}{}
+              \IfValueTF{#4}{\label{#4}}{}
+            \end{figure}%
+          }
           EOF
       
       - name: "Preprocess HTML tags in Markdown"
@@ -167,59 +193,77 @@ jobs:
           import os
           import re
           import sys
-          from bs4 import BeautifulSoup
           
           def process_html_tags(content):
-              # 处理 <img> 标签
+              # 处理 <img> 标签 - 转换为Markdown图片语法
               img_pattern = re.compile(r'<img\s+([^>]+)>', re.IGNORECASE)
               
               def replace_img(match):
                   attrs_str = match.group(1)
                   attrs = {}
-                  for attr in re.findall(r'(\w+)\s*=\s*"([^"]*)"', attrs_str):
-                      attrs[attr[0]] = attr[1]
+                  # 提取属性
+                  for attr_match in re.finditer(r'(\w+)\s*=\s*["\']([^"\']*)["\']', attrs_str):
+                      attrs[attr_match.group(1)] = attr_match.group(2)
                   
-                  src = attrs.get('src', '')
-                  alt = attrs.get('alt', '')
-                  width = attrs.get('width', '')
+                  src = attrs.get('src', '').strip()
+                  alt = attrs.get('alt', '').strip()
+                  width = attrs.get('width', '').strip()
                   
-                  if width:
-                      return f'![{alt}]({src}){{ width={width} }}'
+                  # 构建Markdown图片语法
+                  if width and width.isdigit():
+                      return f'![{alt}]({src}){{ width={int(width)/800 if int(width) > 800 else int(width)/1000} }}'
                   else:
                       return f'![{alt}]({src})'
               
               content = img_pattern.sub(replace_img, content)
               
-              # 处理 <center> 标签
-              content = re.sub(r'<center>(.*?)</center>', r'\\begin{center}\n\1\n\\end{center}', content, flags=re.DOTALL)
-              
-              # 处理 <a> 标签
+              # 处理 <a> 标签 - 转换为Markdown链接语法
               a_pattern = re.compile(r'<a\s+([^>]+)>(.*?)</a>', re.IGNORECASE | re.DOTALL)
               
               def replace_a(match):
                   attrs_str = match.group(1)
                   text = match.group(2).strip()
                   attrs = {}
-                  for attr in re.findall(r'(\w+)\s*=\s*"([^"]*)"', attrs_str):
-                      attrs[attr[0]] = attr[1]
+                  for attr_match in re.finditer(r'(\w+)\s*=\s*["\']([^"\']*)["\']', attrs_str):
+                      attrs[attr_match.group(1)] = attr_match.group(2)
                   
-                  href = attrs.get('href', '#')
-                  if 'target="_blank"' in attrs_str:
+                  href = attrs.get('href', '#').strip()
+                  # 清理文本中的多余空格和换行
+                  text = re.sub(r'\s+', ' ', text)
+                  
+                  if 'download' in attrs_str.lower():
+                      return f'[{text}]({href}){{download}}'
+                  elif 'target="_blank"' in attrs_str.lower():
                       return f'[{text}]({href}){{target="_blank"}}'
-                  return f'[{text}]({href})'
+                  else:
+                      return f'[{text}]({href})'
               
               content = a_pattern.sub(replace_a, content)
               
-              # 处理表格中的HTML
-              content = re.sub(r'<table>', r'\begin{table}[H]\n\centering\n\begin{tabular}', content)
-              content = re.sub(r'</table>', r'\end{tabular}\n\end{table}', content)
+              # 处理 <center> 标签 - 转换为LaTeX center环境
+              center_pattern = re.compile(r'<center>(.*?)</center>', re.IGNORECASE | re.DOTALL)
+              content = center_pattern.sub(r'\\begin{center}\n\\1\n\\end{center}', content)
+              
+              # 处理HTML表格标签 - 转换为LaTeX表格
+              content = re.sub(r'<table>', r'\\begin{table}[H]\n\\centering\n\\begin{tabular}', content)
+              content = re.sub(r'</table>', r'\\end{tabular}\n\\end{table}', content)
+              
+              # 处理 <table> 行
+              content = re.sub(r'<tr>', r'', content)
+              content = re.sub(r'</tr>', r' \\\\', content)
+              
+              # 处理 <td> 和 <th>
+              content = re.sub(r'<td[^>]*>', r'', content)
+              content = re.sub(r'</td>', r' & ', content)
+              content = re.sub(r'<th[^>]*>', r'\\textbf{', content)
+              content = re.sub(r'</th>', r'} & ', content)
               
               return content
           
           def process_markdown_file(filepath):
               print(f"Processing: {filepath}")
               try:
-                  with open(filepath, 'r', encoding='utf-8') as f:
+                  with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
                       content = f.read()
                   
                   # 预处理HTML标签
@@ -230,21 +274,47 @@ jobs:
                       f.write(processed_content)
                       
                   print(f"Successfully processed: {filepath}")
+                  return True
               except Exception as e:
                   print(f"Error processing {filepath}: {e}")
+                  return False
           
           # 遍历所有Markdown文件
+          processed_count = 0
+          error_count = 0
+          
           for root, dirs, files in os.walk('.'):
               # 跳过.git目录和pdf_output目录
-              dirs[:] = [d for d in dirs if d not in ['.git', 'pdf_output', '__pycache__']]
+              dirs[:] = [d for d in dirs if d not in ['.git', 'pdf_output', '__pycache__', '.github']]
               
               for file in files:
                   if file.endswith('.md'):
                       filepath = os.path.join(root, file)
-                      process_markdown_file(filepath)
+                      if process_markdown_file(filepath):
+                          processed_count += 1
+                      else:
+                          error_count += 1
+          
+          print(f"Processed {processed_count} files, {error_count} errors")
+          
+          if error_count > 0:
+              sys.exit(1)
           EOF
           
           python3 preprocess_html.py
+      
+      - name: "Create images directory"
+        run: |
+          mkdir -p images
+      
+      - name: "Copy images to working directory"
+        run: |
+          # 查找所有图片并复制到images目录
+          find . -type f \( -name "*.png" -o -name "*.jpg" -o -name "*.jpeg" -o -name "*.gif" -o -name "*.svg" \) \
+            -not -path "./.*" -not -path "./pdf_output/*" -not -path "./images/*" | \
+            while read img; do
+              cp "$img" images/ 2>/dev/null || true
+            done
       
       - name: "Set up output directory"
         run: |
@@ -252,7 +322,7 @@ jobs:
       
       - name: "Convert Markdown to PDF"
         run: |
-          MD_FILES=$(find . -name "*.md" -not -path "./.*" -not -path "*/node_modules/*" | sed 's/^\.\///')
+          MD_FILES=$(find . -name "*.md" -not -path "./.*" -not -path "*/node_modules/*" -not -path "./pdf_output/*" | sed 's/^\.\///')
           
           IFS=$'\n'
           converted_count=0
@@ -261,6 +331,8 @@ jobs:
           for md_file in $MD_FILES; do
             [ -z "$md_file" ] && continue
             
+            echo "Processing: $md_file"
+            
             dir_name=$(dirname "$md_file")
             base_name=$(basename "$md_file" .md)
             
@@ -268,6 +340,7 @@ jobs:
             
             md_dir=$(dirname "$md_file")
            
+            # 复制相关资源文件
             if [ -d "$dir_name/resource" ]; then
               mkdir -p "pdf_output/$dir_name/resource"
               find "$dir_name/resource" -type f -exec cp {} "pdf_output/$dir_name/resource/" 2>/dev/null \; || true
@@ -281,10 +354,16 @@ jobs:
             set +e
             
             # 构建资源路径
-            resource_paths="$md_dir:.:./picture:./resource"
+            resource_paths="$md_dir:.:./picture:./resource:./images"
+            
+            # 创建临时目录用于提取媒体
+            temp_dir=$(mktemp -d)
+            
+            echo "Converting $md_file to PDF..."
             
             pandoc "$md_file" \
               --resource-path="$resource_paths" \
+              --extract-media="$temp_dir" \
               -o "pdf_output/$dir_name/$base_name.pdf" \
               --pdf-engine=xelatex \
               --listings \
@@ -301,32 +380,55 @@ jobs:
               -V papersize=a4 \
               --wrap=auto \
               --highlight-style=tango \
-              --shift-heading-level-by=0 \
-              --extract-media=pdf_output \
-              -f markdown+raw_html+link_attributes \
-              2>&1 > /dev/null
+              -f markdown+raw_html+link_attributes+auto_identifiers \
+              2>&1 | tee conversion.log
+              
+            conversion_status=$?
             
             set -e
             
-            if [ -f "pdf_output/$dir_name/$base_name.pdf" ] && [ -s "pdf_output/$dir_name/$base_name.pdf" ]; then
+            # 检查转换是否成功
+            if [ $conversion_status -eq 0 ] && [ -f "pdf_output/$dir_name/$base_name.pdf" ] && [ -s "pdf_output/$dir_name/$base_name.pdf" ]; then
+              echo "✓ Successfully converted: $md_file"
               converted_count=$((converted_count + 1))
-              echo "Successfully converted: $md_file"
+              
+              # 复制提取的媒体文件
+              if [ -d "$temp_dir" ]; then
+                find "$temp_dir" -type f -exec cp {} "pdf_output/$dir_name/" 2>/dev/null \; || true
+              fi
             else
+              echo "✗ Failed to convert: $md_file"
               failed_count=$((failed_count + 1))
-              echo "Failed to convert: $md_file"
+              
+              # 显示错误信息
+              if [ -f "conversion.log" ]; then
+                echo "--- Conversion Log ---"
+                tail -50 conversion.log
+                echo "--- End Log ---"
+              fi
             fi
+            
+            # 清理临时目录
+            rm -rf "$temp_dir" conversion.log 2>/dev/null || true
+            
           done
           
+          echo "========================================"
           echo "转换完成: $converted_count 成功, $failed_count 失败"
+          echo "========================================"
           
-          if [ $converted_count -eq 0 ] && [ $failed_count -gt 0 ]; then
-            exit 1
+          if [ $failed_count -gt 0 ]; then
+            # 如果有失败，但不一定是致命错误
+            if [ $converted_count -eq 0 ]; then
+              echo "所有转换都失败了！"
+              exit 1
+            else
+              echo "部分转换失败，但继续流程..."
+            fi
           fi
       
       - name: "Verify PDF files"
         run: |
-          sudo apt-get install -y poppler-utils
-          
           total_pdfs=$(find pdf_output -name "*.pdf" -type f 2>/dev/null | wc -l)
           
           if [ $total_pdfs -eq 0 ]; then
@@ -335,7 +437,11 @@ jobs:
           else
             echo "Total PDF files generated: $total_pdfs"
             
-            # 检查PDF文件大小
+            # 检查PDF文件大小和基本信息
+            find pdf_output -name "*.pdf" -type f -exec pdfinfo {} \; 2>/dev/null | head -20 || true
+            
+            # 显示生成的PDF文件
+            echo "Generated PDF files:"
             find pdf_output -name "*.pdf" -type f -exec ls -lh {} \;
           fi
       
