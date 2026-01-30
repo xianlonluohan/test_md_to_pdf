@@ -41,9 +41,16 @@ jobs:
             tree \
             jq
       
+      - name: "Verify font installation"
+        run: |
+          echo "检查已安装的字体..."
+          fc-list :lang=zh | head -20
+          echo "Noto CJK 字体:"
+          fc-list | grep -i "noto.*cjk" | head -10
+      
       - name: "Create LaTeX template"
         run: |
-          # 创建模板，移除换行箭头
+          # 创建简化的模板，使用系统自动查找字体
           cat > header.tex << 'EOF'
           % 中文支持 - 使用简单可靠的设置
           \usepackage{xeCJK}
@@ -53,6 +60,12 @@ jobs:
           \setCJKmainfont{Noto Serif CJK SC}
           \setCJKsansfont{Noto Sans CJK SC}
           \setCJKmonofont{Noto Sans Mono CJK SC}
+          
+          % 如果上述字体不可用，使用备用字体
+          \setCJKfamilyfont{zhsong}{Noto Serif CJK SC}
+          \setCJKfamilyfont{zhhei}{Noto Sans CJK SC}
+          \setCJKfamilyfont{zhkai}{AR PL UKai CN}
+          \setCJKfamilyfont{zhfs}{AR PL UMing CN}
           
           % 页面设置 - 使用中等边距
           \usepackage[margin=1.2in]{geometry}
@@ -78,7 +91,7 @@ jobs:
           \definecolor{commentcolor}{rgb}{0,0.5,0}
           \definecolor{stringcolor}{rgb}{0.64,0.08,0.08}
           
-          % 改进的代码块设置 - 移除换行箭头
+          % 改进的代码块设置
           \lstset{
             basicstyle=\ttfamily\footnotesize,
             backgroundcolor=\color{codebg},
@@ -90,8 +103,7 @@ jobs:
             breakatwhitespace=false,  % 允许在任何字符处换行
             breakautoindent=true,
             breakindent=0pt,
-            % 移除换行箭头，改为空或空格
-            postbreak=\mbox{},
+            postbreak=\raisebox{0ex}[0ex][0ex]{\ensuremath{\color{red}\hookrightarrow\space}},
             showstringspaces=false,
             tabsize=2,
             numbers=none,
@@ -103,6 +115,27 @@ jobs:
             keywordstyle=\color{keywordcolor}\bfseries,
             commentstyle=\color{commentcolor}\itshape,
             stringstyle=\color{stringcolor},
+          }
+          
+          % C++ 代码样式
+          \lstdefinelanguage{C++}{
+            keywords={alignas, alignof, and, and_eq, asm, auto, bitand, bitor, bool,
+              break, case, catch, char, char8_t, char16_t, char32_t, class,
+              compl, concept, const, consteval, constexpr, const_cast, continue,
+              co_await, co_return, co_yield, decltype, default, delete, do,
+              double, dynamic_cast, else, enum, explicit, export, extern, false,
+              float, for, friend, goto, if, inline, int, long, mutable, namespace,
+              new, noexcept, not, not_eq, nullptr, operator, or, or_eq, private,
+              protected, public, register, reinterpret_cast, requires, return,
+              short, signed, sizeof, static, static_assert, static_cast, struct,
+              switch, template, this, thread_local, throw, true, try, typedef,
+              typeid, typename, union, unsigned, using, virtual, void, volatile,
+              wchar_t, while, xor, xor_eq},
+            sensitive=true,
+            morecomment=[l]{//},
+            morecomment=[s]{/*}{*/},
+            morestring=[b]",
+            morestring=[b]'
           }
           
           % 处理过长的等号和连字符
@@ -294,7 +327,7 @@ jobs:
           echo "- **代码块样式**: 使用带边框的代码框，自动换行" >> pdf_output/README.md
           echo "- **页面边距**: 1.2英寸边距，防止内容溢出" >> pdf_output/README.md
           echo "- **中文字体**: 使用Noto CJK字体" >> pdf_output/README.md
-          echo "- **改进功能**: 移除换行箭头符号，优化代码显示" >> pdf_output/README.md
+          echo "- **改进功能**: 修复字体问题，优化代码显示" >> pdf_output/README.md
           echo "" >> pdf_output/README.md
           
           echo "## 文件列表" >> pdf_output/README.md
