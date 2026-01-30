@@ -39,113 +39,103 @@ jobs:
             fonts-wqy-zenhei \
             lmodern \
             tree \
-            jq \
-            poppler-utils
+            jq
       
       - name: "Create LaTeX template"
         run: |
           cat > header.tex << 'EOF'
-          \documentclass{article}
           \usepackage{xeCJK}
           \usepackage[UTF8]{ctex}
           \setCJKmainfont{Noto Serif CJK SC}
           \setCJKsansfont{Noto Sans CJK SC}
           \setCJKmonofont{Noto Sans Mono CJK SC}
-
+          
           \usepackage[margin=1.2in]{geometry}
-          \usepackage{graphicx}  % 添加图片支持
-          \usepackage{float}     % 添加浮动体控制
-
-          % 增强超链接支持
-          \usepackage[pdftex,
-                      colorlinks=true,
-                      linkcolor=blue,
-                      urlcolor=blue,
-                      citecolor=blue,
-                      breaklinks=true,
-                      pdfborder={0 0 0}]{hyperref}
-                      
-          % 处理 URL 断行
-          \usepackage{xurl}
-
-          % 添加对图片扩展名的支持
-          \DeclareGraphicsExtensions{.png,.jpg,.jpeg,.pdf,.PNG,.JPG,.JPEG}
-
+          
+          \usepackage{hyperref}
+          \hypersetup{
+            colorlinks=true,
+            linkcolor=blue,
+            urlcolor=blue,
+            citecolor=blue,
+            pdfborder={0 0 0},
+          }
+          
           \usepackage{listings}
           \usepackage{xcolor}
-
+          
           \definecolor{codebg}{rgb}{0.98,0.98,0.98}
           \definecolor{framecolor}{rgb}{0.8,0.8,0.8}
-
+          
           \lstset{
-              basicstyle=\ttfamily\normalsize,
-              backgroundcolor=\color{codebg},
-              frame=single,
-              framesep=6pt,
-              framerule=0.8pt,
-              rulecolor=\color{framecolor},
-              breaklines=true,
-              breakatwhitespace=false,
-              breakautoindent=true,
-              breakindent=0pt,
-              postbreak=\raisebox{0ex}[0ex][0ex]{\ensuremath{\color{red}\hookrightarrow\space}},
-              showstringspaces=false,
-              tabsize=2,
-              numbers=none,
-              xleftmargin=12pt,
-              xrightmargin=12pt,
-              upquote=true,
-              columns=fullflexible,
-              keepspaces=true,
+            basicstyle=\ttfamily\normalsize,
+            backgroundcolor=\color{codebg},
+            frame=single,
+            framesep=6pt,
+            framerule=0.8pt,
+            rulecolor=\color{framecolor},
+            breaklines=true,
+            breakatwhitespace=false,
+            breakautoindent=true,
+            breakindent=0pt,
+            postbreak=\raisebox{0ex}[0ex][0ex]{\ensuremath{\color{red}\hookrightarrow\space}},
+            showstringspaces=false,
+            tabsize=2,
+            numbers=none,
+            xleftmargin=12pt,
+            xrightmargin=12pt,
+            upquote=true,
+            columns=fullflexible,
+            keepspaces=true,
           }
-
+          
           \usepackage{parskip}
           \setlength{\parindent}{0pt}
           \setlength{\parskip}{0.8em}
-
+          
           \sloppy
           \emergencystretch=3em
-
+          
           \usepackage{eso-pic}
           \usepackage{tikz}
           \usetikzlibrary{calc}
-
+          
           \newcommand\BackgroundPicture{%
-              \begin{tikzpicture}[remember picture,overlay]
-                  \coordinate (page center) at (current page.center);
-                  \pgfmathsetmacro{\pagewidth}{\paperwidth}
-                  \pgfmathsetmacro{\pageheight}{\paperheight}
+            \begin{tikzpicture}[remember picture,overlay]
+              \coordinate (page center) at (current page.center);
+              \pgfmathsetmacro{\pagewidth}{\paperwidth}
+              \pgfmathsetmacro{\pageheight}{\paperheight}
+              
+              \pgfmathsetmacro{\hcount}{3}
+              \pgfmathsetmacro{\vcount}{5}
+              \pgfmathsetmacro{\hspace}{\paperwidth/(\hcount+1)}
+              \pgfmathsetmacro{\vspace}{\paperheight/(\vcount+1)}
+              
+              \foreach \i in {1,...,\hcount} {
+                \foreach \j in {1,...,\vcount} {
+                  \pgfmathsetmacro{\x}{-\paperwidth/2 + \i*\hspace}
+                  \pgfmathsetmacro{\y}{-\paperheight/2 + \j*\vspace}
                   
-                  \pgfmathsetmacro{\hcount}{3}
-                  \pgfmathsetmacro{\vcount}{5}
-                  \pgfmathsetmacro{\hspace}{\paperwidth/(\hcount+1)}
-                  \pgfmathsetmacro{\vspace}{\paperheight/(\vcount+1)}
-                  
-                  \foreach \i in {1,...,\hcount} {
-                      \foreach \j in {1,...,\vcount} {
-                          \pgfmathsetmacro{\x}{-\paperwidth/2 + \i*\hspace}
-                          \pgfmathsetmacro{\y}{-\paperheight/2 + \j*\vspace}
-                          
-                          \node at ($(page center) + (\x pt, \y pt)$) [
-                              rotate=45,
-                              scale=1.5,
-                              text=gray!30,
-                              opacity=0.4,
-                              font=\sffamily\bfseries\small
-                          ] {emakefun};
-                      }
-                  }
-                  
-                  \node at (page center) [
-                      rotate=45,
-                      scale=3,
-                      text=gray!30,
-                      opacity=0.6,
-                      font=\sffamily\bfseries
+                  \node at ($(page center) + (\x pt, \y pt)$) [
+                    rotate=45,
+                    scale=1.5,
+                    text=gray!30,
+                    opacity=0.4,
+                    font=\sffamily\bfseries\small
                   ] {emakefun};
-              \end{tikzpicture}%
+                }
+              }
+              
+              \node at (page center) [
+                rotate=45,
+                scale=3,
+                text=gray!30,
+                opacity=0.6,
+                font=\sffamily\bfseries
+              ] {emakefun};
+            \end{tikzpicture}%
           }
-
+          
           \AddToShipoutPictureBG{\BackgroundPicture}
           EOF
       
@@ -153,30 +143,9 @@ jobs:
         run: |
           mkdir -p pdf_output
       
-      - name: "Copy supporting files"
-        run: |
-          # 查找并复制所有图片文件
-          find . -type f \( -name "*.png" -o -name "*.jpg" -o -name "*.jpeg" -o -name "*.gif" -o -name "*.svg" \) \
-            -not -path "./.*" \
-            -not -path "*/node_modules/*" \
-            -not -path "*/pdf_output/*" \
-            | while read img; do
-                dir=$(dirname "$img")
-                mkdir -p "pdf_output/$dir"
-                cp "$img" "pdf_output/$dir/"
-              done
-          
-          # 确保常见图片目录存在
-          for dir in picture pictures images img; do
-            if [ -d "$dir" ]; then
-              mkdir -p "pdf_output/$dir"
-              cp -r "$dir"/* "pdf_output/$dir/" 2>/dev/null || true
-            fi
-          done
-      
       - name: "Convert Markdown to PDF"
         run: |
-          MD_FILES=$(find . -name "*.md" -not -path "./.*" -not -path "*/node_modules/*" -not -path "*/pdf_output/*" | sed 's/^\.\///')
+          MD_FILES=$(find . -name "*.md" -not -path "./.*" -not -path "*/node_modules/*" | sed 's/^\.\///')
           
           IFS=$'\n'
           converted_count=0
@@ -191,29 +160,16 @@ jobs:
             mkdir -p "pdf_output/$dir_name"
             
             md_dir=$(dirname "$md_file")
-            
-            # 复制资源目录
+           
             if [ -d "$dir_name/resource" ]; then
               mkdir -p "pdf_output/$dir_name/resource"
               find "$dir_name/resource" -type f -exec cp {} "pdf_output/$dir_name/resource/" 2>/dev/null \; || true
             fi
             
-            # 确保图片目录存在
-            if [ -d "$dir_name/picture" ]; then
-              mkdir -p "pdf_output/$dir_name/picture"
-              find "$dir_name/picture" -type f -exec cp {} "pdf_output/$dir_name/picture/" 2>/dev/null \; || true
-            fi
-            
-            echo "正在转换: $md_file"
-            
             set +e
             
-            # 构建资源路径，包括当前目录、父目录和图片目录
-            resource_paths="$md_dir:.:"
-            resource_paths+="$(find . -type d -name "picture" -o -name "pictures" -o -name "images" -o -name "img" 2>/dev/null | tr '\n' ':')"
-            
             pandoc "$md_file" \
-              --resource-path="$resource_paths" \
+              --resource-path="$md_dir:.:." \
               -o "pdf_output/$dir_name/$base_name.pdf" \
               --pdf-engine=xelatex \
               --listings \
@@ -230,50 +186,32 @@ jobs:
               -V papersize=a4 \
               --wrap=auto \
               --highlight-style=tango \
-              --extract-media="pdf_output/$dir_name" \
-              -f markdown+smart \
-              -t pdf \
-              --verbose 2>&1 | tee -a conversion.log
+              2>&1 > /dev/null
             
             set -e
             
             if [ -f "pdf_output/$dir_name/$base_name.pdf" ] && [ -s "pdf_output/$dir_name/$base_name.pdf" ]; then
-              echo "✓ 成功转换: $md_file"
               converted_count=$((converted_count + 1))
             else
-              echo "✗ 转换失败: $md_file"
               failed_count=$((failed_count + 1))
             fi
           done
           
           echo "转换完成: $converted_count 成功, $failed_count 失败"
           
-          # 显示转换日志
-          if [ -f "conversion.log" ]; then
-            echo "=== 转换日志 ==="
-            tail -50 conversion.log
-          fi
-          
           if [ $converted_count -eq 0 ] && [ $failed_count -gt 0 ]; then
-            echo "所有转换都失败！"
             exit 1
           fi
       
       - name: "Verify PDF files"
         run: |
+          sudo apt-get install -y poppler-utils
+          
           total_pdfs=$(find pdf_output -name "*.pdf" -type f 2>/dev/null | wc -l)
           
           if [ $total_pdfs -eq 0 ]; then
-            echo "错误: 未生成任何 PDF 文件"
             exit 1
           fi
-          
-          echo "找到 $total_pdfs 个 PDF 文件:"
-          find pdf_output -name "*.pdf" -type f | sed 's/^/  /'
-          
-          # 检查 PDF 文件大小
-          echo "=== PDF 文件大小 ==="
-          find pdf_output -name "*.pdf" -type f -exec du -h {} \; | sort -hr
       
       - name: "Create release documentation"
         run: |
@@ -288,7 +226,6 @@ jobs:
           echo "生成时间: $(date '+%Y-%m-%d %H:%M:%S')" >> pdf_output/README.md
           echo "代码块带边框，自动换行" >> pdf_output/README.md
           echo "添加平铺式 'emakefun' 水印" >> pdf_output/README.md
-          echo "已修复图片显示和链接可点击问题" >> pdf_output/README.md
           echo "" >> pdf_output/README.md
           
           echo "## 文件列表" >> pdf_output/README.md
@@ -316,14 +253,6 @@ jobs:
           
           echo "" >> pdf_output/README.md
           echo "总计: $PDF_COUNT 个 PDF 文件" >> pdf_output/README.md
-          
-          # 添加已知问题说明
-          echo "" >> pdf_output/README.md
-          echo "## 注意事项" >> pdf_output/README.md
-          echo "" >> pdf_output/README.md
-          echo "1. 图片显示: 已添加对常见图片格式的支持" >> pdf_output/README.md
-          echo "2. 链接可点击: 已配置超链接为蓝色可点击文字" >> pdf_output/README.md
-          echo "3. 代码块: 带边框和自动换行" >> pdf_output/README.md
       
       - name: "Create zip archive for release"
         if: startsWith(github.ref, 'refs/tags/')
