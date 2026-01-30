@@ -1,17 +1,12 @@
-name: "Markdown to PDF Converter with Tiled Watermark"
+name: "Markdown to PDF Converter"
 
 on:
   push:
-    branches: ["main", "master"]
-    tags: ["v*", "pdf-*"]
-  pull_request:
     branches: ["main", "master"]
   workflow_dispatch:
 
 permissions:
   contents: write
-  pages: write
-  id-token: write
 
 jobs:
   convert-md-to-pdf:
@@ -31,339 +26,263 @@ jobs:
             texlive-xetex \
             texlive-latex-extra \
             texlive-fonts-recommended \
+            texlive-fonts-extra \
+            texlive-science \
             texlive-latex-recommended \
-            texlive-lang-chinese \
+            lmodern \
             fonts-noto-cjk \
             fonts-noto-cjk-extra \
             fonts-wqy-microhei \
             fonts-wqy-zenhei \
-            lmodern \
-            tree \
-            jq \
+            ghostscript \
             poppler-utils
       
-      - name: "Create LaTeX template"
+      - name: "Create simple LaTeX template"
         run: |
-          cat > header.tex << 'EOF'
+          cat > template.tex << 'EOF'
+          \documentclass[12pt]{article}
           \usepackage{xeCJK}
-          \usepackage[UTF8]{ctex}
           \setCJKmainfont{Noto Serif CJK SC}
           \setCJKsansfont{Noto Sans CJK SC}
           \setCJKmonofont{Noto Sans Mono CJK SC}
-
-          \usepackage[margin=1.2in]{geometry}
-          \usepackage{graphicx}  % 添加图片支持
-          \usepackage{float}     % 添加浮动体控制
-          \usepackage{caption}   % 添加图片标题支持
-          \usepackage{wrapfig}   % 添加图文混排支持
-
-          % 增强超链接支持 - 使用xetex驱动（因为使用XeLaTeX）
-          \usepackage[xetex,
-                      colorlinks=true,
-                      linkcolor=blue,
-                      urlcolor=blue,
-                      citecolor=blue,
-                      breaklinks=true,
-                      pdfborder={0 0 0}]{hyperref}
-                      
-          % 处理 URL 断行
-          \usepackage{xurl}
-
-          % 添加对图片扩展名的支持
-          \DeclareGraphicsExtensions{.png,.jpg,.jpeg,.pdf,.PNG,.JPG,.JPEG}
-
-          \usepackage{listings}
-          \usepackage{xcolor}
-
-          \definecolor{codebg}{rgb}{0.98,0.98,0.98}
-          \definecolor{framecolor}{rgb}{0.8,0.8,0.8}
-
-          \lstset{
-              basicstyle=\ttfamily\normalsize,
-              backgroundcolor=\color{codebg},
-              frame=single,
-              framesep=6pt,
-              framerule=0.8pt,
-              rulecolor=\color{framecolor},
-              breaklines=true,
-              breakatwhitespace=false,
-              breakautoindent=true,
-              breakindent=0pt,
-              postbreak=\raisebox{0ex}[0ex][0ex]{\ensuremath{\color{red}\hookrightarrow\space}},
-              showstringspaces=false,
-              tabsize=2,
-              numbers=none,
-              xleftmargin=12pt,
-              xrightmargin=12pt,
-              upquote=true,
-              columns=fullflexible,
-              keepspaces=true,
-          }
-
-          \usepackage{parskip}
-          \setlength{\parindent}{0pt}
-          \setlength{\parskip}{0.8em}
-
-          \sloppy
-          \emergencystretch=3em
-
-          \usepackage{eso-pic}
-          \usepackage{tikz}
-          \usetikzlibrary{calc}
-
-          \newcommand\BackgroundPicture{%
-              \begin{tikzpicture}[remember picture,overlay]
-                  \coordinate (page center) at (current page.center);
-                  \pgfmathsetmacro{\pagewidth}{\paperwidth}
-                  \pgfmathsetmacro{\pageheight}{\paperheight}
-                  
-                  \pgfmathsetmacro{\hcount}{3}
-                  \pgfmathsetmacro{\vcount}{5}
-                  \pgfmathsetmacro{\hspace}{\paperwidth/(\hcount+1)}
-                  \pgfmathsetmacro{\vspace}{\paperheight/(\vcount+1)}
-                  
-                  \foreach \i in {1,...,\hcount} {
-                      \foreach \j in {1,...,\vcount} {
-                          \pgfmathsetmacro{\x}{-\paperwidth/2 + \i*\hspace}
-                          \pgfmathsetmacro{\y}{-\paperheight/2 + \j*\vspace}
-                          
-                          \node at ($(page center) + (\x pt, \y pt)$) [
-                              rotate=45,
-                              scale=1.5,
-                              text=gray!30,
-                              opacity=0.4,
-                              font=\sffamily\bfseries\small
-                          ] {emakefun};
-                      }
-                  }
-                  
-                  \node at (page center) [
-                      rotate=45,
-                      scale=3,
-                      text=gray!30,
-                      opacity=0.6,
-                      font=\sffamily\bfseries
-                  ] {emakefun};
-              \end{tikzpicture}%
-          }
-
-          \AddToShipoutPictureBG{\BackgroundPicture}
           
-          % 处理HTML链接转换
-          \usepackage{url}
-          \urlstyle{same}
+          \usepackage[margin=1in]{geometry}
+          \usepackage{graphicx}
+          \usepackage{xcolor}
+          \usepackage{hyperref}
+          \hypersetup{
+            colorlinks=true,
+            linkcolor=blue,
+            urlcolor=blue,
+            citecolor=blue,
+            pdfborder={0 0 0}
+          }
+          
+          \usepackage{listings}
+          \lstset{
+            basicstyle=\ttfamily\small,
+            backgroundcolor=\color{gray!10},
+            frame=single,
+            framerule=0.5pt,
+            rulecolor=\color{gray!50},
+            breaklines=true,
+            breakatwhitespace=true,
+            tabsize=2,
+            numbers=none
+          }
+          
+          \title{\$title\$}
+          \author{}
+          \date{\$date\$}
+          
+          \begin{document}
+          
+          \maketitle
+          
+          \$body\$
+          
+          \end{document}
           EOF
       
-      - name: "Set up output directory"
+      - name: "Create output directory"
         run: |
           mkdir -p pdf_output
       
-      - name: "Copy supporting files"
+      - name: "Copy all resources"
         run: |
-          echo "开始复制支持文件..."
+          echo "Copying all resource files..."
           
-          # 查找并复制所有图片文件
-          find . -type f \( -name "*.png" -o -name "*.jpg" -o -name "*.jpeg" -o -name "*.gif" -o -name "*.svg" \) \
+          # Copy all directories that might contain resources
+          for dir in $(find . -type d -name "picture" -o -name "resource" -o -name "images" -o -name "img" 2>/dev/null); do
+            rel_dir=$(echo $dir | sed 's|^\./||')
+            mkdir -p "pdf_output/$rel_dir"
+            cp -r "$dir"/* "pdf_output/$rel_dir/" 2>/dev/null || true
+          done
+          
+          # Copy individual image files
+          find . -type f \( -name "*.png" -o -name "*.jpg" -o -name "*.jpeg" -o -name "*.gif" -o -name "*.svg" -o -name "*.pdf" \) \
             -not -path "./.*" \
             -not -path "*/node_modules/*" \
             -not -path "*/pdf_output/*" \
             | while read img; do
-                dir=$(dirname "$img")
+                dir=$(dirname "$img" | sed 's|^\./||')
                 mkdir -p "pdf_output/$dir"
-                cp "$img" "pdf_output/$dir/" && echo "复制: $img -> pdf_output/$dir/"
+                cp "$img" "pdf_output/$dir/" && echo "Copied: $img"
               done
-          
-          # 检查并复制常见的图片目录
-          echo "检查常见图片目录..."
-          for dir in picture pictures images img resource; do
-            if [ -d "$dir" ]; then
-              echo "发现目录: $dir"
-              mkdir -p "pdf_output/$dir"
-              find "$dir" -type f \( -name "*.png" -o -name "*.jpg" -o -name "*.jpeg" -o -name "*.gif" \) \
-                -exec cp {} "pdf_output/$dir/" \; 2>/dev/null || true
-            fi
-          done
       
-      - name: "Convert Markdown to PDF"
+      - name: "Convert Markdown files to PDF (Simple Method)"
         run: |
-          # 查找所有Markdown文件
+          echo "Converting Markdown files to PDF..."
+          
+          # Test with one file first
+          test_file=$(find . -name "*.md" -not -path "./.*" -not -path "*/node_modules/*" -not -path "*/pdf_output/*" | head -1)
+          
+          if [ -z "$test_file" ]; then
+            echo "No Markdown files found!"
+            exit 1
+          fi
+          
+          echo "Test file: $test_file"
+          
+          # Create output directory for test
+          test_dir=$(dirname "$test_file")
+          base_name=$(basename "$test_file" .md)
+          mkdir -p "pdf_output/$test_dir"
+          
+          # Try a simple conversion
+          pandoc "$test_file" \
+            -o "pdf_output/$test_dir/$base_name.pdf" \
+            --pdf-engine=xelatex \
+            --template=template.tex \
+            -V mainfont="DejaVu Sans" \
+            -V geometry:margin=1in \
+            -V lang=zh-CN \
+            --verbose 2>&1 | tee test_conversion.log
+          
+          if [ -f "pdf_output/$test_dir/$base_name.pdf" ]; then
+            echo "✓ Test conversion successful!"
+            echo "File size: $(du -h "pdf_output/$test_dir/$base_name.pdf" | cut -f1)"
+          else
+            echo "✗ Test conversion failed"
+            cat test_conversion.log
+            exit 1
+          fi
+      
+      - name: "Convert all Markdown files"
+        run: |
+          echo "Starting batch conversion..."
+          
           MD_FILES=$(find . -name "*.md" -not -path "./.*" -not -path "*/node_modules/*" -not -path "*/pdf_output/*" | sed 's/^\.\///')
           
-          IFS=$'\n'
-          converted_count=0
-          failed_count=0
-          
-          echo "找到的Markdown文件:"
-          echo "$MD_FILES" | while read file; do echo "  $file"; done
+          total_count=0
+          success_count=0
+          fail_count=0
           
           for md_file in $MD_FILES; do
-            [ -z "$md_file" ] && continue
+            total_count=$((total_count + 1))
+            echo ""
+            echo "Processing [$total_count]: $md_file"
             
             dir_name=$(dirname "$md_file")
             base_name=$(basename "$md_file" .md)
             
             mkdir -p "pdf_output/$dir_name"
             
-            md_dir=$(dirname "$md_file")
+            # Extract and copy resources for this file
+            if [ -d "$dir_name/picture" ]; then
+              mkdir -p "pdf_output/$dir_name/picture"
+              cp -r "$dir_name/picture"/* "pdf_output/$dir_name/picture/" 2>/dev/null || true
+            fi
             
-            echo "正在转换: $md_file"
-            echo "输出到: pdf_output/$dir_name/$base_name.pdf"
+            if [ -d "$dir_name/resource" ]; then
+              mkdir -p "pdf_output/$dir_name/resource"
+              cp -r "$dir_name/resource"/* "pdf_output/$dir_name/resource/" 2>/dev/null || true
+            fi
             
-            # 创建临时目录用于转换
-            temp_dir=$(mktemp -d)
+            # Build resource path
+            resource_path="$dir_name:.:./pdf_output"
             
-            set +e
-            
-            # 构建资源路径
-            resource_paths="$md_dir:.:./pdf_output"
-            
-            # 使用pandoc进行转换
+            # Convert with minimal options
             pandoc "$md_file" \
-              --resource-path="$resource_paths" \
+              --resource-path="$resource_path" \
               -o "pdf_output/$dir_name/$base_name.pdf" \
               --pdf-engine=xelatex \
-              --listings \
-              --include-in-header=header.tex \
+              --template=template.tex \
               -V mainfont="Noto Serif CJK SC" \
               -V sansfont="Noto Sans CJK SC" \
               -V monofont="Noto Sans Mono CJK SC" \
-              -V geometry:margin=1.2in \
-              -V geometry:a4paper \
+              -V geometry:margin=1in \
               -V colorlinks=true \
-              -V linkcolor=blue \
-              -V urlcolor=blue \
               -V lang=zh-CN \
               -V papersize=a4 \
               --wrap=auto \
-              --highlight-style=tango \
-              --extract-media="pdf_output/$dir_name" \
-              -f markdown+smart \
+              -f markdown \
               -t pdf \
-              --verbose 2>&1 | tee "$temp_dir/pandoc.log"
+              --verbose 2>&1 | tee -a conversion.log | tail -20
             
-            pandoc_exit_code=$?
-            
-            set -e
-            
-            # 检查转换结果
-            if [ $pandoc_exit_code -eq 0 ] && [ -f "pdf_output/$dir_name/$base_name.pdf" ] && [ -s "pdf_output/$dir_name/$base_name.pdf" ]; then
-              echo "✓ 成功转换: $md_file"
-              converted_count=$((converted_count + 1))
-              
-              # 验证PDF文件
-              pdfsize=$(du -h "pdf_output/$dir_name/$base_name.pdf" | cut -f1)
-              echo "  生成文件大小: $pdfsize"
+            if [ $? -eq 0 ] && [ -f "pdf_output/$dir_name/$base_name.pdf" ] && [ -s "pdf_output/$dir_name/$base_name.pdf" ]; then
+              echo "✓ Success: $md_file"
+              success_count=$((success_count + 1))
             else
-              echo "✗ 转换失败: $md_file (退出码: $pandoc_exit_code)"
-              echo "=== 转换日志开始 ==="
-              cat "$temp_dir/pandoc.log" 2>/dev/null || echo "无日志"
-              echo "=== 转换日志结束 ==="
-              failed_count=$((failed_count + 1))
+              echo "✗ Failed: $md_file"
+              fail_count=$((fail_count + 1))
             fi
-            
-            # 清理临时目录
-            rm -rf "$temp_dir"
           done
           
-          echo "转换完成: $converted_count 成功, $failed_count 失败"
+          echo ""
+          echo "========================================="
+          echo "Conversion Summary:"
+          echo "Total files: $total_count"
+          echo "Successful: $success_count"
+          echo "Failed: $fail_count"
+          echo "========================================="
           
-          if [ $failed_count -gt 0 ]; then
-            echo "警告: $failed_count 个文件转换失败"
-          fi
-          
-          if [ $converted_count -eq 0 ] && [ $failed_count -gt 0 ]; then
-            echo "错误: 所有转换都失败！"
+          if [ $success_count -eq 0 ]; then
+            echo "ERROR: No files were converted successfully!"
+            echo "Last 50 lines of conversion log:"
+            tail -50 conversion.log
             exit 1
           fi
       
       - name: "Verify PDF files"
         run: |
-          echo "开始验证PDF文件..."
+          echo "Verifying generated PDF files..."
           
-          total_pdfs=$(find pdf_output -name "*.pdf" -type f 2>/dev/null | wc -l)
+          pdf_files=$(find pdf_output -name "*.pdf" -type f 2>/dev/null | wc -l)
           
-          if [ $total_pdfs -eq 0 ]; then
-            echo "错误: 未生成任何 PDF 文件"
+          if [ $pdf_files -eq 0 ]; then
+            echo "ERROR: No PDF files generated!"
             exit 1
           fi
           
-          echo "找到 $total_pdfs 个 PDF 文件:"
-          find pdf_output -name "*.pdf" -type f | sort | while read pdf; do
+          echo "Found $pdf_files PDF files:"
+          find pdf_output -name "*.pdf" -type f | while read pdf; do
             size=$(du -h "$pdf" | cut -f1)
             echo "  $pdf ($size)"
           done
-      
-      - name: "Create release documentation"
-        run: |
-          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
-            TAG_NAME="${GITHUB_REF#refs/tags/}"
-          else
-            TAG_NAME="latest"
+          
+          # Check if files are valid PDFs
+          echo ""
+          echo "Checking PDF validity..."
+          invalid_count=0
+          find pdf_output -name "*.pdf" -type f | while read pdf; do
+            if ! pdfinfo "$pdf" >/dev/null 2>&1; then
+              echo "  Invalid PDF: $pdf"
+              invalid_count=$((invalid_count + 1))
+            fi
+          done
+          
+          if [ $invalid_count -gt 0 ]; then
+            echo "ERROR: Found $invalid_count invalid PDF files!"
+            exit 1
           fi
-          
-          echo "# PDF 文档集" > pdf_output/README.md
+      
+      - name: "Create index file"
+        run: |
+          echo "# Generated PDF Files" > pdf_output/README.md
           echo "" >> pdf_output/README.md
-          echo "生成时间: $(date '+%Y-%m-%d %H:%M:%S')" >> pdf_output/README.md
-          echo "代码块带边框，自动换行" >> pdf_output/README.md
-          echo "添加平铺式 'emakefun' 水印" >> pdf_output/README.md
-          echo "已修复图片显示和链接可点击问题" >> pdf_output/README.md
-          echo "使用 XeLaTeX 引擎和 xetex 驱动" >> pdf_output/README.md
+          echo "Generated on: $(date '+%Y-%m-%d %H:%M:%S')" >> pdf_output/README.md
           echo "" >> pdf_output/README.md
-          
-          echo "## 文件列表" >> pdf_output/README.md
+          echo "## File List" >> pdf_output/README.md
           echo "" >> pdf_output/README.md
           
-          PDF_COUNT=$(find pdf_output -name "*.pdf" -type f 2>/dev/null | wc -l)
-          
-          current_dir=""
-          find pdf_output -name "*.pdf" -type f | sort | while read pdf_file; do
-            rel_path=${pdf_file#pdf_output/}
+          find pdf_output -name "*.pdf" -type f | sort | while read pdf; do
+            rel_path=${pdf#pdf_output/}
             dir_name=$(dirname "$rel_path")
             file_name=$(basename "$rel_path")
-            file_size=$(du -h "$pdf_file" | cut -f1)
+            file_size=$(du -h "$pdf" | cut -f1)
             
-            if [ "$current_dir" != "$dir_name" ]; then
-              current_dir="$dir_name"
-              if [ "$dir_name" != "." ]; then
-                echo "### $dir_name/" >> pdf_output/README.md
-                echo "" >> pdf_output/README.md
-              fi
+            if [ "$dir_name" != "." ]; then
+              echo "### $dir_name/" >> pdf_output/README.md
+              echo "" >> pdf_output/README.md
             fi
             
             echo "- [$file_name]($rel_path) ($file_size)" >> pdf_output/README.md
           done
-          
-          echo "" >> pdf_output/README.md
-          echo "总计: $PDF_COUNT 个 PDF 文件" >> pdf_output/README.md
       
-      - name: "Create zip archive for release"
-        if: startsWith(github.ref, 'refs/tags/')
-        run: |
-          TAG_NAME="${GITHUB_REF#refs/tags/}"
-          
-          cd pdf_output
-          zip -r "../pdf-documents-$TAG_NAME.zip" .
-          cd ..
-      
-      - name: "Upload PDF artifacts"
+      - name: "Upload artifacts"
         uses: actions/upload-artifact@v4
         with:
           name: pdf-documents
-          path: |
-            pdf_output/
-            pdf-documents-*.zip
+          path: pdf_output/
           retention-days: 7
-      
-      - name: "Create GitHub Release"
-        if: startsWith(github.ref, 'refs/tags/')
-        id: create_release
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: ${{ github.ref_name }}
-          name: "PDF Documents - ${{ github.ref_name }}"
-          body_path: pdf_output/README.md
-          files: |
-            pdf-documents-${{ github.ref_name }}.zip
-          draft: false
-          prerelease: false
-          generate_release_notes: true
