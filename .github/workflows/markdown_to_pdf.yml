@@ -68,7 +68,7 @@ jobs:
           \definecolor{framecolor}{rgb}{0.8,0.8,0.8}
           
           \lstset{
-            basicstyle=\ttfamily\footnotesize,
+            basicstyle=\ttfamily\normalsize,
             backgroundcolor=\color{codebg},
             frame=single,
             framesep=6pt,
@@ -106,8 +106,8 @@ jobs:
               \pgfmathsetmacro{\pagewidth}{\paperwidth}
               \pgfmathsetmacro{\pageheight}{\paperheight}
               
-              \pgfmathsetmacro{\hcount}{5}
-              \pgfmathsetmacro{\vcount}{7}
+              \pgfmathsetmacro{\hcount}{3}
+              \pgfmathsetmacro{\vcount}{5}
               \pgfmathsetmacro{\hspace}{\paperwidth/(\hcount+1)}
               \pgfmathsetmacro{\vspace}{\paperheight/(\vcount+1)}
               
@@ -117,9 +117,9 @@ jobs:
                   \pgfmathsetmacro{\y}{-\paperheight/2 + \j*\vspace}
                   
                   \node at ($(page center) + (\x pt, \y pt)$) [
-                    rotate=30,
-                    scale=1.8,
-                    text=gray!27,
+                    rotate=45,
+                    scale=1.5,
+                    text=gray!30,
                     opacity=0.4,
                     font=\sffamily\bfseries\small
                   ] {emakefun};
@@ -127,9 +127,9 @@ jobs:
               }
               
               \node at (page center) [
-                rotate=30,
+                rotate=45,
                 scale=3,
-                text=gray!12,
+                text=gray!30,
                 opacity=0.6,
                 font=\sffamily\bfseries
               ] {emakefun};
