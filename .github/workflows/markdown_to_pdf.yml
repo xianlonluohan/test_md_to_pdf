@@ -57,8 +57,8 @@ jobs:
           \usepackage{caption}   % 添加图片标题支持
           \usepackage{wrapfig}   % 添加图文混排支持
 
-          % 增强超链接支持
-          \usepackage[pdftex,
+          % 增强超链接支持 - 使用xetex驱动（因为使用XeLaTeX）
+          \usepackage[xetex,
                       colorlinks=true,
                       linkcolor=blue,
                       urlcolor=blue,
@@ -249,6 +249,10 @@ jobs:
             if [ $pandoc_exit_code -eq 0 ] && [ -f "pdf_output/$dir_name/$base_name.pdf" ] && [ -s "pdf_output/$dir_name/$base_name.pdf" ]; then
               echo "✓ 成功转换: $md_file"
               converted_count=$((converted_count + 1))
+              
+              # 验证PDF文件
+              pdfsize=$(du -h "pdf_output/$dir_name/$base_name.pdf" | cut -f1)
+              echo "  生成文件大小: $pdfsize"
             else
               echo "✗ 转换失败: $md_file (退出码: $pandoc_exit_code)"
               echo "=== 转换日志开始 ==="
@@ -263,8 +267,12 @@ jobs:
           
           echo "转换完成: $converted_count 成功, $failed_count 失败"
           
+          if [ $failed_count -gt 0 ]; then
+            echo "警告: $failed_count 个文件转换失败"
+          fi
+          
           if [ $converted_count -eq 0 ] && [ $failed_count -gt 0 ]; then
-            echo "所有转换都失败！"
+            echo "错误: 所有转换都失败！"
             exit 1
           fi
       
@@ -299,6 +307,7 @@ jobs:
           echo "代码块带边框，自动换行" >> pdf_output/README.md
           echo "添加平铺式 'emakefun' 水印" >> pdf_output/README.md
           echo "已修复图片显示和链接可点击问题" >> pdf_output/README.md
+          echo "使用 XeLaTeX 引擎和 xetex 驱动" >> pdf_output/README.md
           echo "" >> pdf_output/README.md
           
           echo "## 文件列表" >> pdf_output/README.md
