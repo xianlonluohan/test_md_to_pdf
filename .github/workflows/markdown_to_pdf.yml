@@ -33,7 +33,6 @@ jobs:
             texlive-fonts-recommended \
             texlive-latex-recommended \
             texlive-lang-chinese \
-            texlive-pictures \
             fonts-noto-cjk \
             fonts-noto-cjk-extra \
             fonts-wqy-microhei \
@@ -42,7 +41,6 @@ jobs:
             tree \
             jq \
             ghostscript \
-            imagemagick \
             poppler-utils \
             zip
       
@@ -55,7 +53,7 @@ jobs:
       
       - name: "Create LaTeX template with watermark"
         run: |
-          # 创建带水印的LaTeX模板
+          # 创建带水印的LaTeX模板 - 修复版本
           cat > header.tex << 'EOF'
           % 中文支持 - 使用简单可靠的设置
           \usepackage{xeCJK}
@@ -155,24 +153,12 @@ jobs:
           \sloppy
           \emergencystretch=3em
           
-          % ============ 简化的水印设置 ============
-          \usepackage{tikz}
-          \usetikzlibrary{calc}  % 添加calc库
-          \usepackage{everypage}
-          
-          % 定义水印命令
-          \AddEverypageHook{
-            \begin{tikzpicture}[remember picture, overlay]
-              % 设置中心水印样式
-              \node [rotate=45, scale=10, text opacity=0.08, color=gray!60] at (current page.center) {\textbf{emakefun}};
-              
-              % 使用绝对坐标而不是calc计算，避免问题
-              \node [rotate=0, scale=5, text opacity=0.05, color=gray!50] at (1.5in, 10in) {\textbf{emakefun}};
-              \node [rotate=0, scale=5, text opacity=0.05, color=gray!50] at (7in, 10in) {\textbf{emakefun}};
-              \node [rotate=0, scale=5, text opacity=0.05, color=gray!50] at (1.5in, 1in) {\textbf{emakefun}};
-              \node [rotate=0, scale=5, text opacity=0.05, color=gray!50] at (7in, 1in) {\textbf{emakefun}};
-            \end{tikzpicture}
-          }
+          % ============ 简化水印设置 ============
+          \usepackage{draftwatermark}
+          \SetWatermarkText{emakefun}
+          \SetWatermarkScale{4}
+          \SetWatermarkColor[gray]{0.9}
+          \SetWatermarkAngle{45}
           % ============ 水印设置结束 ============
           EOF
       
@@ -180,45 +166,9 @@ jobs:
         run: |
           mkdir -p pdf_output
       
-      - name: "Test LaTeX compilation"
+      - name: "Test simple conversion"
         run: |
-          echo "测试LaTeX模板编译..."
-          
-          # 创建一个简单的测试文档
-          cat > test.tex << 'EOF'
-          \documentclass{article}
-          \usepackage{xeCJK}
-          \usepackage[UTF8]{ctex}
-          \setCJKmainfont{Noto Serif CJK SC}
-          
-          % 导入我们的水印设置
-          \input{header.tex}
-          
-          \begin{document}
-          
-          \title{测试文档}
-          \author{测试作者}
-          \date{\today}
-          
-          \maketitle
-          
-          \section{测试部分}
-          这是一个测试文档，用于验证LaTeX模板是否正常工作。
-          
-          如果这个文档能成功编译，说明模板没有问题。
-          
-          \end{document}
-          EOF
-          
-          # 尝试编译测试文档
-          xelatex -interaction=nonstopmode test.tex && echo "✓ LaTeX模板编译成功" || echo "⚠ LaTeX模板编译失败，但继续尝试"
-      
-      - name: "Convert Markdown to PDF with watermark"
-        run: |
-          echo "开始转换Markdown文件到PDF（带水印）..."
-          
-          # 先尝试转换一个简单的文件，确保工作正常
-          echo "首先测试一个简单文件..."
+          echo "测试简单转换..."
           
           # 创建测试Markdown文件
           cat > test_simple.md << 'EOF'
@@ -241,36 +191,36 @@ jobs:
           ```
           EOF
           
-          # 测试转换
+          # 测试转换 - 最简配置
           pandoc test_simple.md \
             -o test_simple.pdf \
             --pdf-engine=xelatex \
-            --listings \
             --include-in-header=header.tex \
             -V mainfont="Noto Serif CJK SC" \
-            -V sansfont="Noto Sans CJK SC" \
-            -V monofont="Noto Sans Mono CJK SC" \
             -V geometry:margin=1.2in \
             -V geometry:a4paper \
-            -V colorlinks=true \
-            -V linkcolor=blue \
-            -V urlcolor=blue \
-            -V lang=zh-CN \
-            -V papersize=a4 \
-            --wrap=auto \
-            --highlight-style=tango \
             2>&1 | tee test_pandoc.log
           
           if [ -f "test_simple.pdf" ]; then
             echo "✓ 测试文件转换成功"
+            # 检查是否包含水印
+            if strings test_simple.pdf | grep -q "emakefun"; then
+              echo "✓ 确认已添加水印"
+            else
+              echo "⚠ 水印可能未添加"
+            fi
             rm test_simple.md test_simple.pdf
           else
-            echo "⚠ 测试文件转换失败，检查日志..."
+            echo "✗ 测试文件转换失败"
             cat test_pandoc.log
           fi
+      
+      - name: "Convert Markdown to PDF with watermark"
+        run: |
+          echo "开始转换Markdown文件到PDF（带水印）..."
           
           # 查找所有md文件
-          MD_FILES=$(find . -name "*.md" -not -path "./.*" -not -path "*/node_modules/*" -not -path "./test_simple.md" | sed 's/^\.\///')
+          MD_FILES=$(find . -name "*.md" -not -path "./.*" -not -path "*/node_modules/*" | sed 's/^\.\///')
           
           echo "找到的文件数量: $(echo "$MD_FILES" | wc -l)"
           
@@ -293,7 +243,7 @@ jobs:
             # 获取Markdown文件所在目录
             md_dir=$(dirname "$md_file")
             
-            # 转换Markdown为PDF（带水印）- 使用更简单的参数
+            # 转换Markdown为PDF - 使用最简配置
             set +e
             
             # 创建临时文件用于存储日志
@@ -304,15 +254,10 @@ jobs:
               --resource-path="$md_dir:.:." \
               -o "pdf_output/$dir_name/$base_name.pdf" \
               --pdf-engine=xelatex \
-              --listings \
               --include-in-header=header.tex \
               -V mainfont="Noto Serif CJK SC" \
               -V geometry:margin=1.2in \
               -V geometry:a4paper \
-              -V colorlinks=true \
-              -V linkcolor=blue \
-              -V urlcolor=blue \
-              --wrap=auto \
               2>&1 | tee "$log_file"
             
             set -e
@@ -323,43 +268,41 @@ jobs:
               
               # 检查文件头部是否有效
               if file "pdf_output/$dir_name/$base_name.pdf" | grep -q "PDF document"; then
-                echo "  ✓ 成功: $base_name.pdf ($file_size) [已添加水印]"
+                echo "  ✓ 成功: $base_name.pdf ($file_size)"
+                
+                # 检查是否包含水印
+                if strings "pdf_output/$dir_name/$base_name.pdf" | grep -q "emakefun"; then
+                  echo "    ✓ 已添加水印"
+                else
+                  echo "    ⚠ 可能未添加水印"
+                fi
+                
                 converted_count=$((converted_count + 1))
                 rm -f "$log_file"
               else
                 echo "  ⚠ 可能有问题: $base_name.pdf ($file_size)"
                 failed_count=$((failed_count + 1))
                 failed_files="$failed_files\n  - $md_file"
-                echo "日志文件: $log_file"
               fi
             else
               echo "  ✗ 失败: $md_file"
               failed_count=$((failed_count + 1))
               failed_files="$failed_files\n  - $md_file"
               echo "查看错误日志: $log_file"
-              tail -50 "$log_file"
+              tail -20 "$log_file"
             fi
           done
           
           echo ""
           echo "================================"
           echo "转换完成!"
-          echo "成功: $converted_count 个文件 (均已添加'emakefun'水印)"
+          echo "成功: $converted_count 个文件"
           echo "失败: $failed_count 个文件"
           
           if [ $failed_count -gt 0 ]; then
             echo ""
             echo "失败的文件:"
             echo -e "$failed_files"
-            
-            # 如果有失败，显示前5个日志文件的最后几行
-            echo ""
-            echo "错误日志摘要:"
-            find . -name "pandoc_*.log" -type f | head -5 | while read log; do
-              echo "=== $log ==="
-              tail -20 "$log"
-              echo ""
-            done
           fi
           
           echo "================================"
@@ -367,54 +310,7 @@ jobs:
           # 如果所有文件都失败，则退出
           if [ $converted_count -eq 0 ] && [ $failed_count -gt 0 ]; then
             echo "错误: 没有成功转换任何文件"
-            # 显示更详细的错误信息
-            find . -name "pandoc_*.log" -type f | head -3 | while read log; do
-              echo "=== 详细错误 ($log) ==="
-              tail -50 "$log"
-            done
             exit 1
-          fi
-      
-      - name: "Add watermark to existing PDFs as fallback"
-        if: failure()
-        run: |
-          echo "尝试使用ImageMagick为现有PDF添加水印（备用方法）..."
-          
-          # 如果pdf_output目录存在，尝试为其中的PDF添加水印
-          if [ -d "pdf_output" ]; then
-            find pdf_output -name "*.pdf" -type f | while read pdf_file; do
-              echo "处理: $pdf_file"
-              
-              # 检查文件大小，如果文件太小可能损坏
-              file_size=$(stat -c%s "$pdf_file" 2>/dev/null || echo "0")
-              if [ "$file_size" -lt 1000 ]; then
-                echo "  ⚠ 文件太小，可能已损坏，跳过"
-                continue
-              fi
-              
-              # 创建临时文件名
-              output_file="${pdf_file%.pdf}_watermarked.pdf"
-              temp_file="${pdf_file%.pdf}_temp.pdf"
-              
-              # 使用convert添加水印
-              echo "  正在添加水印..."
-              if convert -density 150 "$pdf_file" -background white -alpha remove \
-                -fill "rgba(200,200,200,0.1)" -pointsize 72 -rotate -45 \
-                -gravity center -draw "text 0,0 'emakefun'" \
-                "$temp_file" 2>/dev/null; then
-                
-                if [ -f "$temp_file" ]; then
-                  mv "$temp_file" "$pdf_file"
-                  echo "  ✓ 已添加水印: $(basename "$pdf_file")"
-                else
-                  echo "  ⚠ 水印添加失败"
-                fi
-              else
-                echo "  ⚠ 水印添加失败，保持原文件"
-              fi
-            done
-          else
-            echo "pdf_output目录不存在，跳过备用方法"
           fi
       
       - name: "Verify PDF files"
@@ -432,27 +328,33 @@ jobs:
             # 验证每个PDF文件
             valid_count=0
             invalid_files=""
+            watermarked_count=0
             
-            find pdf_output -name "*.pdf" -type f | sort | head -10 | while read pdf_file; do
+            find pdf_output -name "*.pdf" -type f | sort | head -5 | while read pdf_file; do
               size=$(du -h "$pdf_file" | cut -f1)
               
               # 使用pdfinfo验证PDF
               if pdfinfo "$pdf_file" >/dev/null 2>&1; then
-                echo "  ✓ 有效: $pdf_file ($size) [带水印]"
+                echo "  ✓ 有效: $(basename "$pdf_file") ($size)"
                 valid_count=$((valid_count + 1))
+                
+                # 检查水印
+                if strings "$pdf_file" | grep -q "emakefun"; then
+                  echo "    ✓ 包含水印"
+                  watermarked_count=$((watermarked_count + 1))
+                else
+                  echo "    ⚠ 未检测到水印"
+                fi
               else
-                echo "  ✗ 无效: $pdf_file ($size)"
+                echo "  ✗ 无效: $(basename "$pdf_file") ($size)"
                 invalid_files="$invalid_files\n  - $pdf_file"
               fi
             done
             
             echo ""
-            echo "抽样验证结果: $valid_count 个有效PDF文件"
-            
-            if [ -n "$invalid_files" ]; then
-              echo "无效的PDF文件:"
-              echo -e "$invalid_files"
-            fi
+            echo "抽样验证结果:"
+            echo "- 有效PDF文件: $valid_count"
+            echo "- 带水印文件: $watermarked_count"
           fi
       
       - name: "Create release documentation"
@@ -477,10 +379,8 @@ jobs:
             echo "- **标签**: $TAG_NAME" >> pdf_output/README.md
           fi
           echo "- **水印**: 已添加 'emakefun' 防盗水印" >> pdf_output/README.md
-          echo "- **代码块样式**: 使用带边框的代码框，自动换行" >> pdf_output/README.md
           echo "- **页面边距**: 1.2英寸边距，防止内容溢出" >> pdf_output/README.md
           echo "- **中文字体**: 使用Noto CJK字体" >> pdf_output/README.md
-          echo "- **改进功能**: 添加防盗水印，优化代码显示" >> pdf_output/README.md
           echo "" >> pdf_output/README.md
           
           echo "## 文件列表" >> pdf_output/README.md
@@ -494,7 +394,7 @@ jobs:
           else
             # 按目录组织文件列表
             current_dir=""
-            find pdf_output -name "*.pdf" -type f | sort | head -20 | while read pdf_file; do
+            find pdf_output -name "*.pdf" -type f | sort | while read pdf_file; do
               rel_path=${pdf_file#pdf_output/}
               dir_name=$(dirname "$rel_path")
               file_name=$(basename "$rel_path")
@@ -509,7 +409,7 @@ jobs:
                 fi
               fi
               
-              echo "- [$file_name]($rel_path) ($file_size) 📝" >> pdf_output/README.md
+              echo "- [$file_name]($rel_path) ($file_size)" >> pdf_output/README.md
             done
             
             echo "" >> pdf_output/README.md
@@ -543,7 +443,6 @@ jobs:
           path: |
             pdf_output/
             pdf-documents-*.zip
-            header.tex
           retention-days: 7
       
       - name: "Create GitHub Release"
@@ -559,14 +458,3 @@ jobs:
           draft: false
           prerelease: false
           generate_release_notes: true
-      
-      - name: "Verify release creation"
-        if: startsWith(github.ref, 'refs/tags/')
-        run: |
-          echo "处理完成!"
-          if [ -d "pdf_output" ] && [ -n "$(ls -A pdf_output 2>/dev/null)" ]; then
-            echo "已生成带'emakefun'水印的PDF文档"
-            echo "访问: https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }}"
-          else
-            echo "警告: 未生成PDF文档"
-          fi
