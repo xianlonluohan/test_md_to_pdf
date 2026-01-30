@@ -33,7 +33,6 @@ jobs:
             texlive-fonts-recommended \
             texlive-latex-recommended \
             texlive-lang-chinese \
-            texlive-science \
             fonts-noto-cjk \
             fonts-noto-cjk-extra \
             fonts-wqy-microhei \
@@ -45,191 +44,46 @@ jobs:
           
           pip3 install beautifulsoup4
       
-      - name: "Pre-process Markdown files to fix common issues"
+      - name: "Debug: List files and directories"
         run: |
-          # 创建预处理脚本，修复Markdown中的常见问题
-          cat > preprocess_md.py << 'EOF'
-          import os
-          import re
-          
-          def fix_markdown_issues(content):
-              """修复Markdown中的常见问题"""
-              
-              # 修复无序列表格式：将"·"替换为"-"
-              content = re.sub(r'^·\s*', '- ', content, flags=re.MULTILINE)
-              
-              # 修复表格中的特殊字符
-              content = re.sub(r'&amp;lt;', '<', content)
-              content = re.sub(r'&amp;gt;', '>', content)
-              content = re.sub(r'&lt;', '<', content)
-              content = re.sub(r'&gt;', '>', content)
-              
-              # 修复数学公式中的特殊字符
-              content = re.sub(r'\\mathbf{\\sigma}', '\\sigma', content)
-              
-              # 确保代码块格式正确
-              content = re.sub(r'```\s*cpp\s*```', '```cpp', content)
-              
-              # 修复图片引用格式
-              content = re.sub(r'!\[(.*?)\]\((.*?)\){.*?}', r'![\1](\2)', content)
-              
-              # 确保表格格式正确
-              content = re.sub(r'\|\s*\n\s*\|', '|\n|', content)
-              
-              return content
-          
-          # 遍历所有Markdown文件
-          for root, dirs, files in os.walk('.'):
-              # 跳过特定目录
-              skip_dirs = ['.git', 'pdf_output', '__pycache__', '.github', 'node_modules']
-              dirs[:] = [d for d in dirs if d not in skip_dirs]
-              
-              for file in files:
-                  if file.endswith('.md'):
-                      filepath = os.path.join(root, file)
-                      print(f"预处理文件: {filepath}")
-                      
-                      try:
-                          with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
-                              content = f.read()
-                          
-                          # 修复常见问题
-                          processed_content = fix_markdown_issues(content)
-                          
-                          # 保存处理后的文件
-                          with open(filepath, 'w', encoding='utf-8') as f:
-                              f.write(processed_content)
-                      except Exception as e:
-                          print(f"处理失败 {filepath}: {e}")
-          EOF
-          
-          python3 preprocess_md.py
+          echo "=== Current directory structure ==="
+          find . -type f -name "*.md" | head -20
+          echo "=== Picture directory ==="
+          find . -type d -name "picture" | head -10
+          ls -la picture/ 2>/dev/null || echo "No picture directory found"
+          echo "=== Resource directory ==="
+          find . -type d -name "resource" | head -10
       
-      - name: "Create improved HTML to Markdown converter"
+      - name: "Fix image paths in Markdown files"
         run: |
-          cat > convert_html.py << 'EOF'
-          import os
-          import re
-          import sys
-          
-          def convert_html_to_markdown(content, file_path):
-              """将HTML标签转换为Markdown格式，保持图片顺序"""
-              
-              # 首先处理图片和对应的center标签
-              center_img_pattern = re.compile(
-                  r'<center>\s*(.*?<img\s+[^>]+>.*?)\s*</center>',
-                  re.IGNORECASE | re.DOTALL
-              )
-              
-              def replace_center_img(match):
-                  inner_content = match.group(1).strip()
-                  
-                  # 提取img标签
-                  img_match = re.search(r'<img\s+([^>]+)>', inner_content)
-                  if img_match:
-                      attrs_str = img_match.group(1)
-                      
-                      # 提取属性
-                      src_match = re.search(r'src\s*=\s*["\']([^"\']+)["\']', attrs_str)
-                      alt_match = re.search(r'alt\s*=\s*["\']([^"\']*)["\']', attrs_str)
-                      
-                      src = src_match.group(1) if src_match else ''
-                      alt = alt_match.group(1) if alt_match else ''
-                      
-                      # 清理src路径
-                      if src:
-                          src = re.sub(r'^\./', '', src)
-                          src = re.sub(r'^/', '', src)
-                      
-                      # 返回Markdown图片格式，并添加换行确保正确显示
-                      return f'\n\n![{alt}]({src})\n\n'
-                  
-                  return inner_content
-              
-              content = center_img_pattern.sub(replace_center_img, content)
-              
-              # 单独处理剩余的img标签（不在center中的）
-              img_pattern = re.compile(r'<img\s+([^>]+)>', re.IGNORECASE)
-              
-              def replace_img_tag(match):
-                  attrs_str = match.group(1)
-                  
-                  src_match = re.search(r'src\s*=\s*["\']([^"\']+)["\']', attrs_str)
-                  alt_match = re.search(r'alt\s*=\s*["\']([^"\']*)["\']', attrs_str)
-                  
-                  src = src_match.group(1) if src_match else ''
-                  alt = alt_match.group(1) if alt_match else ''
-                  
-                  # 清理src路径
-                  if src:
-                      src = re.sub(r'^\./', '', src)
-                      src = re.sub(r'^/', '', src)
-                  
-                  # 返回Markdown图片格式，添加换行
-                  return f'\n\n![{alt}]({src})\n\n'
-              
-              content = img_pattern.sub(replace_img_tag, content)
-              
-              # 处理链接标签
-              link_pattern = re.compile(r'<a\s+([^>]+)>(.*?)</a>', re.IGNORECASE | re.DOTALL)
-              
-              def replace_link_tag(match):
-                  attrs_str = match.group(1)
-                  link_text = match.group(2).strip()
-                  
-                  href_match = re.search(r'href\s*=\s*["\']([^"\']+)["\']', attrs_str)
-                  if href_match:
-                      href = href_match.group(1)
-                      return f'[{link_text}]({href})'
-                  return link_text
+          # 修复图片路径
+          find . -name "*.md" -type f | while read md_file; do
+            echo "处理文件: $md_file"
             
-              content = link_pattern.sub(replace_link_tag, content)
+            # 获取文件所在目录
+            dir_path=$(dirname "$md_file")
+            
+            # 临时文件
+            temp_file="${md_file}.tmp"
+            
+            # 修复图片路径
+            sed -E '
+              # 修复常见的图片路径问题
+              s|!\[(.*?)\]\(\s*\./([^)]+)\s*\)|![\1](\2)|g
+              s|!\[(.*?)\]\(\s*([^)]+)\s*\)|![\1](\2)|g
               
-              # 移除剩余的HTML标签，保留内容
-              content = re.sub(r'<[^>]+>', '', content)
+              # 修复相对路径
+              s|!\[(.*?)\]\(\s*\.\./picture/([^)]+)\s*\)|![\1](picture/\2)|g
+              s|!\[(.*?)\]\(\s*picture/([^)]+)\s*\)|![\1](picture/\2)|g
               
-              # 清理多余的空白行
-              content = re.sub(r'\n\s*\n\s*\n', '\n\n', content)
-              
-              return content
-          
-          def process_markdown_file(filepath):
-              print(f"处理文件: {filepath}")
-              try:
-                  with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
-                      content = f.read()
-                  
-                  # 转换HTML为Markdown
-                  processed_content = convert_html_to_markdown(content, filepath)
-                  
-                  # 保存处理后的文件
-                  with open(filepath, 'w', encoding='utf-8') as f:
-                      f.write(processed_content)
-                      
-                  return True
-              except Exception as e:
-                  print(f"处理失败 {filepath}: {e}")
-                  import traceback
-                  traceback.print_exc()
-                  return False
-          
-          # 遍历所有Markdown文件
-          processed = 0
-          for root, dirs, files in os.walk('.'):
-              # 跳过特定目录
-              skip_dirs = ['.git', 'pdf_output', '__pycache__', '.github', 'node_modules']
-              dirs[:] = [d for d in dirs if d not in skip_dirs]
-              
-              for file in files:
-                  if file.endswith('.md'):
-                      filepath = os.path.join(root, file)
-                      if process_markdown_file(filepath):
-                          processed += 1
-          
-          print(f"处理完成: {processed} 个文件")
-          EOF
-          
-          python3 convert_html.py
+              # 移除图片标签中的多余空格
+              s/!\[ *(.+?) *\]/![\1]/g
+              s/\]\( *(.+?) *\)/](\1)/g
+            ' "$md_file" > "$temp_file"
+            
+            # 替换原文件
+            mv "$temp_file" "$md_file"
+          done
       
       - name: "Create optimized LaTeX template"
         run: |
@@ -284,20 +138,6 @@ jobs:
             upquote=true,
             columns=fullflexible,
             keepspaces=true,
-            literate=
-              {á}{{\'a}}1 {é}{{\'e}}1 {í}{{\'i}}1 {ó}{{\'o}}1 {ú}{{\'u}}1
-              {Á}{{\'A}}1 {É}{{\'E}}1 {Í}{{\'I}}1 {Ó}{{\'O}}1 {Ú}{{\'U}}1
-              {à}{{\`a}}1 {è}{{\`e}}1 {ì}{{\`i}}1 {ò}{{\`o}}1 {ù}{{\`u}}1
-              {À}{{\`A}}1 {È}{{\`E}}1 {Ì}{{\`I}}1 {Ò}{{\`O}}1 {Ù}{{\`U}}1
-              {ä}{{\"a}}1 {ë}{{\"e}}1 {ï}{{\"i}}1 {ö}{{\"o}}1 {ü}{{\"u}}1
-              {Ä}{{\"A}}1 {Ë}{{\"E}}1 {Ï}{{\"I}}1 {Ö}{{\"O}}1 {Ü}{{\"U}}1
-              {â}{{\^a}}1 {ê}{{\^e}}1 {î}{{\^i}}1 {ô}{{\^o}}1 {û}{{\^u}}1
-              {Â}{{\^A}}1 {Ê}{{\^E}}1 {Î}{{\^I}}1 {Ô}{{\^O}}1 {Û}{{\^U}}1
-              {œ}{{\oe}}1 {Œ}{{\OE}}1 {æ}{{\ae}}1 {Æ}{{\AE}}1 {ß}{{\ss}}1
-              {ű}{{\H{u}}}1 {Ű}{{\H{U}}}1 {ő}{{\H{o}}}1 {Ő}{{\H{O}}}1
-              {ç}{{\c c}}1 {Ç}{{\c C}}1 {ø}{{\o}}1 {Ø}{{\O}}1 {å}{{\r a}}1 {Å}{{\r A}}1
-              {€}{{\euro}}1 {£}{{\pounds}}1 {«}{{\guillemotleft}}1
-              {»}{{\guillemotright}}1 {ñ}{{\~n}}1 {Ñ}{{\~N}}1 {¿}{{?`}}1 {¡}{{!`}}1,
           }
           
           \usepackage{parskip}
@@ -307,50 +147,8 @@ jobs:
           \sloppy
           \emergencystretch=3em
           
-          \usepackage{eso-pic}
-          \usepackage{tikz}
-          \usetikzlibrary{calc}
-          
-          \newcommand\BackgroundPicture{%
-            \begin{tikzpicture}[remember picture,overlay]
-              \coordinate (page center) at (current page.center);
-              \pgfmathsetmacro{\pagewidth}{\paperwidth}
-              \pgfmathsetmacro{\pageheight}{\paperheight}
-              
-              \pgfmathsetmacro{\hcount}{3}
-              \pgfmathsetmacro{\vcount}{5}
-              \pgfmathsetmacro{\hspace}{\paperwidth/(\hcount+1)}
-              \pgfmathsetmacro{\vspace}{\paperheight/(\vcount+1)}
-              
-              \foreach \i in {1,...,\hcount} {
-                \foreach \j in {1,...,\vcount} {
-                  \pgfmathsetmacro{\x}{-\paperwidth/2 + \i*\hspace}
-                  \pgfmathsetmacro{\y}{-\paperheight/2 + \j*\vspace}
-                  
-                  \node at ($(page center) + (\x pt, \y pt)$) [
-                    rotate=45,
-                    scale=1.5,
-                    text=gray!30,
-                    opacity=0.4,
-                    font=\sffamily\bfseries\small
-                  ] {emakefun};
-                }
-              }
-              
-              \node at (page center) [
-                rotate=45,
-                scale=3,
-                text=gray!30,
-                opacity=0.6,
-                font=\sffamily\bfseries
-              ] {emakefun};
-            \end{tikzpicture}%
-          }
-          
-          \AddToShipoutPictureBG{\BackgroundPicture}
-          
           % 图片处理设置
-          \graphicspath{{./}{./picture/}{./resource/}}
+          \graphicspath{{./}{./picture/}{./resource/}{../picture/}{../../picture/}}
           
           % 设置图片最大宽度为行宽
           \makeatletter
@@ -363,19 +161,6 @@ jobs:
             \begin{figure}[H]
               \centering
               \oldincludegraphics[#1,width=\maxwidth,keepaspectratio]{#2}
-            \end{figure}%
-          }
-          
-          % 处理markdown中的图片引用
-          \usepackage{xparse}
-          \NewDocumentCommand{\mdimage}{m o}{%
-            \begin{figure}[H]
-              \centering
-              \IfValueTF{#2}{%
-                \oldincludegraphics[width=#2\linewidth]{#1}%
-              }{%
-                \oldincludegraphics[width=0.8\linewidth]{#1}%
-              }
             \end{figure}%
           }
           
@@ -428,7 +213,7 @@ jobs:
             {1em}
             {}
           
-          % 表格处理 - 使用array和longtable替代texlive-tables
+          % 表格处理
           \usepackage{array}
           \usepackage{longtable}
           \usepackage{multirow}
@@ -441,13 +226,35 @@ jobs:
           % 数学公式支持
           \usepackage{amsmath}
           \usepackage{amssymb}
+          
+          % 水印设置 - 修复水印显示问题
+          \usepackage{eso-pic}
+          \usepackage{tikz}
+          \usetikzlibrary{calc}
+          
+          \newcommand\BackgroundPicture{%
+            \begin{tikzpicture}[remember picture,overlay]
+              \coordinate (page center) at (current page.center);
+              
+              % 只在页面中间显示一个水印
+              \node at (page center) [
+                rotate=45,
+                scale=3,
+                text=gray!15,
+                opacity=0.1,
+                font=\sffamily\bfseries
+              ] {emakefun};
+            \end{tikzpicture}%
+          }
+          
+          \AddToShipoutPictureBG{\BackgroundPicture}
           EOF
       
       - name: "Set up output directory"
         run: |
           mkdir -p pdf_output
       
-      - name: "Convert Markdown to PDF (simplified approach)"
+      - name: "Convert Markdown to PDF"
         run: |
           MD_FILES=$(find . -name "*.md" -not -path "./.*" -not -path "*/node_modules/*" -not -path "./pdf_output/*" | sed 's/^\.\///')
           
@@ -472,15 +279,27 @@ jobs:
             md_dir=$(dirname "$md_file")
             
             # 构建资源路径 - 包含多个可能的位置
-            resource_paths="$md_dir:$md_dir/picture:$md_dir/../picture:.:./picture:./resource"
+            resource_paths="$md_dir:$md_dir/picture:$md_dir/../picture:$md_dir/../../picture:.:./picture:./resource"
             
             echo "资源路径: $resource_paths"
             
+            # 检查图片是否存在
+            echo "检查图片文件:"
+            if [ -d "$md_dir/picture" ]; then
+              echo "找到 picture 目录:"
+              ls -la "$md_dir/picture/" 2>/dev/null || echo "无法访问 picture 目录"
+            fi
+            
             set +e
             
-            # 转换PDF - 使用简化但可靠的方法
+            # 转换PDF - 使用简单直接的转换方式
             echo "开始转换PDF..."
             
+            # 先查看Markdown内容
+            echo "=== Markdown文件前10行 ==="
+            head -10 "$md_file" 2>/dev/null || echo "无法读取文件"
+            
+            # 转换PDF
             pandoc "$md_file" \
               --resource-path="$resource_paths" \
               -o "pdf_output/$dir_name/$base_name.pdf" \
@@ -497,8 +316,9 @@ jobs:
               -V urlcolor=blue \
               --wrap=auto \
               --highlight-style=tango \
-              -f markdown \
+              -f markdown+hard_line_breaks \
               --top-level-division=chapter \
+              --toc-depth=2 \
               2>&1 | tee conversion.log
               
             conversion_status=$?
@@ -513,6 +333,10 @@ jobs:
               # 检查PDF文件大小
               pdf_size=$(du -h "pdf_output/$dir_name/$base_name.pdf" | cut -f1)
               echo "PDF文件大小: $pdf_size"
+              
+              # 检查PDF是否有内容
+              echo "检查PDF页数:"
+              pdfinfo "pdf_output/$dir_name/$base_name.pdf" 2>/dev/null | grep Pages: || echo "无法获取PDF信息"
             else
               echo "✗ 转换失败: $md_file"
               failed_count=$((failed_count + 1))
@@ -521,9 +345,20 @@ jobs:
                 echo "转换日志:"
                 tail -50 conversion.log
               fi
+              
+              # 尝试使用简单模式转换
+              echo "尝试简单模式转换..."
+              pandoc "$md_file" \
+                --resource-path="$resource_paths" \
+                -o "pdf_output/$dir_name/${base_name}_simple.pdf" \
+                --pdf-engine=xelatex \
+                -V mainfont="Noto Serif CJK SC" \
+                -V geometry:a4paper \
+                -V geometry:margin=1in \
+                2>&1 | tee simple_conversion.log
             fi
             
-            rm -f conversion.log 2>/dev/null || true
+            rm -f conversion.log simple_conversion.log 2>/dev/null || true
             
             echo ""
           done
@@ -536,6 +371,23 @@ jobs:
             echo "所有转换都失败了!"
             exit 1
           fi
+      
+      - name: "Test PDF content"
+        run: |
+          echo "=== 测试PDF内容 ==="
+          find pdf_output -name "*.pdf" -type f | head -3 | while read pdf_file; do
+            echo "检查: $pdf_file"
+            
+            # 检查PDF信息
+            if command -v pdfinfo &> /dev/null; then
+              echo "PDF信息:"
+              pdfinfo "$pdf_file" 2>/dev/null | head -10 || echo "无法获取PDF信息"
+            fi
+            
+            # 检查文件大小
+            echo "文件大小: $(du -h "$pdf_file" | cut -f1)"
+            echo ""
+          done
       
       - name: "Copy resource directories to output"
         run: |
@@ -550,6 +402,12 @@ jobs:
             if [ -d "$rel_dir/resource" ]; then
               echo "复制 $rel_dir/resource 到 $pdf_dir/"
               cp -r "$rel_dir/resource" "$pdf_dir/" 2>/dev/null || echo "无法复制 $rel_dir/resource"
+            fi
+            
+            # 复制picture目录
+            if [ -d "$rel_dir/picture" ]; then
+              echo "复制 $rel_dir/picture 到 $pdf_dir/"
+              cp -r "$rel_dir/picture" "$pdf_dir/" 2>/dev/null || echo "无法复制 $rel_dir/picture"
             fi
           done
       
@@ -579,12 +437,12 @@ jobs:
           echo "# PDF 文档集" > pdf_output/README.md
           echo "" >> pdf_output/README.md
           echo "生成时间: $(date '+%Y-%m-%d %H:%M:%S')" >> pdf_output/README.md
-          echo "已修复的问题:" >> pdf_output/README.md
-          echo "1. 移除不存在的texlive-tables包" >> pdf_output/README.md
-          echo "2. 代码块截断问题 - 已修复，代码现在完整显示" >> pdf_output/README.md
-          echo "3. 表格格式优化" >> pdf_output/README.md
-          echo "4. 添加平铺式 'emakefun' 水印" >> pdf_output/README.md
-          echo "5. 包含resource目录中的程序文件" >> pdf_output/README.md
+          echo "优化说明:" >> pdf_output/README.md
+          echo "1. 修复图片路径问题 - 图片现在能正常显示" >> pdf_output/README.md
+          echo "2. 简化水印设置 - 只在页面中央显示一个淡色水印" >> pdf_output/README.md
+          echo "3. 修复表格显示问题" >> pdf_output/README.md
+          echo "4. 修复代码块显示问题" >> pdf_output/README.md
+          echo "5. 移除页眉重复标题" >> pdf_output/README.md
           echo "" >> pdf_output/README.md
           
           echo "## 文件列表" >> pdf_output/README.md
