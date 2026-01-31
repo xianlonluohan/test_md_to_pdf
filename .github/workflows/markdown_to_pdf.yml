@@ -1,4 +1,4 @@
-name: "Markdown to PDF Converter with Tiled Watermark"
+name: "Markdown to PDF Converter with Tiled Watermark and Fixed Links"
 
 on:
   push:
@@ -40,254 +40,129 @@ jobs:
             lmodern \
             tree \
             jq \
-            python3-pip
+            python3-pip \
+            poppler-utils  # 用于pdftotext验证
           
           pip3 install beautifulsoup4
       
-      - name: "Create HTML to Markdown converter"
+      - name: "Create simplified HTML to Markdown converter"
         run: |
           cat > convert_html.py << 'EOF'
           import os
           import re
-          import sys
           
-          def convert_html_to_markdown(content, file_path):
-              """将HTML标签转换为Markdown格式"""
+          def convert_html_to_markdown(content):
+              """将HTML标签转换为Markdown格式，专注处理链接"""
               
-              # 首先保护代码块，防止处理代码块内的内容
+              # 保护代码块
               code_blocks = []
               def store_code_block(match):
                   code_blocks.append(match.group(0))
                   return f'@@@CODE_BLOCK_{len(code_blocks)-1}@@@'
               
-              # 保护代码块
               content = re.sub(r'```[\s\S]*?```', store_code_block, content)
               content = re.sub(r'~~~[\s\S]*?~~~', store_code_block, content)
               
-              # 处理链接标签 - 优先处理<a>标签
-              def replace_a_tag(match):
-                  full_match = match.group(0)
-                  # 提取href
-                  href_match = re.search(r'href\s*=\s*["\']([^"\']+)["\']', full_match, re.IGNORECASE)
-                  # 提取链接文本
-                  text_match = re.search(r'>([^<]+)<', full_match)
-                  
-                  href = href_match.group(1) if href_match else ''
-                  text = text_match.group(1) if text_match else '链接'
-                  
-                  # 清理href路径
-                  if href:
-                      href = re.sub(r'^\./', '', href)
-                      href = re.sub(r'^/', '', href)
-                  
-                  # 如果有download属性，添加Markdown注释
-                  download_attr = ''
-                  if 'download' in full_match.lower():
-                      download_attr = ' (下载)'
-                  
-                  # 如果有target="_blank"属性，添加外部链接标记
-                  if 'target="_blank"' in full_match.lower():
-                      text = f'{text} ↗'
-                  
-                  return f'[{text}]({href}){download_attr}'
+              # 1. 处理<a>标签 - 这是关键！
+              # 先处理有href的<a>标签
+              a_pattern = re.compile(r'<a\s+([^>]*)>(.*?)</a>', re.IGNORECASE | re.DOTALL)
               
-              # 使用更精确的正则匹配<a>标签
-              a_pattern = re.compile(r'<a\s+[^>]*href\s*=\s*["\'][^"\']+["\'][^>]*>[^<]+</a>', re.IGNORECASE)
+              def replace_a_tag(match):
+                  attrs = match.group(1)
+                  text = match.group(2).strip()
+                  
+                  # 提取href
+                  href_match = re.search(r'href\s*=\s*["\']([^"\']+)["\']', attrs)
+                  if not href_match:
+                      return text  # 没有href，只返回文本
+                  
+                  href = href_match.group(1)
+                  
+                  # 清理href
+                  href = re.sub(r'^\./', '', href)
+                  href = re.sub(r'^/', '', href)
+                  
+                  # 处理download属性
+                  if 'download' in attrs.lower():
+                      # 对于下载链接，保留文本并添加下载标记
+                      return f'[{text}]({href})'
+                  
+                  # 处理target="_blank"
+                  if 'target="_blank"' in attrs.lower():
+                      return f'[{text}]({href})'
+                  
+                  # 普通链接
+                  return f'[{text}]({href})'
+              
               content = a_pattern.sub(replace_a_tag, content)
               
-              # 处理没有href但有其他属性的<a>标签（简化版本）
-              simple_a_pattern = re.compile(r'<a\s[^>]*>([^<]+)</a>', re.IGNORECASE)
-              content = simple_a_pattern.sub(r'\1', content)  # 只保留文本
-              
-              # 处理图片标签
+              # 2. 处理<img>标签
               img_pattern = re.compile(r'<img\s+([^>]+)>', re.IGNORECASE)
-              
               def replace_img_tag(match):
-                  attrs_str = match.group(1)
+                  attrs = match.group(1)
                   
-                  src_match = re.search(r'src\s*=\s*["\']([^"\']+)["\']', attrs_str)
-                  alt_match = re.search(r'alt\s*=\s*["\']([^"\']*)["\']', attrs_str)
+                  src_match = re.search(r'src\s*=\s*["\']([^"\']+)["\']', attrs)
+                  alt_match = re.search(r'alt\s*=\s*["\']([^"\']*)["\']', attrs)
                   
                   src = src_match.group(1) if src_match else ''
                   alt = alt_match.group(1) if alt_match else ''
                   
-                  # 清理src路径
                   if src:
                       src = re.sub(r'^\./', '', src)
                       src = re.sub(r'^/', '', src)
                   
-                  # 返回Markdown图片格式
                   return f'![{alt}]({src})'
               
               content = img_pattern.sub(replace_img_tag, content)
               
-              # 处理center标签 - 移除即可
+              # 3. 处理center标签
               content = re.sub(r'<center>(.*?)</center>', r'\1', content, flags=re.DOTALL | re.IGNORECASE)
               
-              # 修复头文件包含问题 - 保护尖括号
+              # 4. 移除其他简单的HTML标签，保留文本
+              content = re.sub(r'</?(?:p|br|div|span|strong|em|b|i|u)[^>]*>', '', content, flags=re.IGNORECASE)
+              
+              # 5. 修复头文件包含问题
               content = re.sub(r'#include\s+([^<>\s][^\s]*)(?!\s*>)', r'#include <\1>', content)
               
-              # 处理LaTeX数学公式
-              content = re.sub(r'\\\(', r'$', content)
-              content = re.sub(r'\\\)', r'$', content)
-              
-              # 移除其他HTML标签，但保护尖括号内容
-              content = re.sub(r'<(?!\/?(?:img|a|center|br|p|div|span|table|tr|td|th|ul|ol|li|strong|em|b|i|u|h[1-6]|code|pre)\b)[^>]+>', '', content, flags=re.IGNORECASE)
-              
-              # 修复链接格式问题
-              content = re.sub(r'\[链接\]\((https?://[^)]+)\)', r'[链接](\1)', content)
-              
-              # 恢复代码块
+              # 6. 恢复代码块
               for i, code_block in enumerate(code_blocks):
                   placeholder = f'@@@CODE_BLOCK_{i}@@@'
                   content = content.replace(placeholder, code_block)
               
               return content
           
-          def process_markdown_file(filepath):
-              print(f"处理文件: {filepath}")
-              try:
-                  with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
-                      content = f.read()
-                  
-                  # 转换HTML为Markdown
-                  processed_content = convert_html_to_markdown(content, filepath)
-                  
-                  # 保存处理后的文件
-                  with open(filepath, 'w', encoding='utf-8') as f:
-                      f.write(processed_content)
-                      
-                  return True
-              except Exception as e:
-                  print(f"处理失败 {filepath}: {e}")
-                  return False
-          
-          # 遍历所有Markdown文件
-          processed = 0
-          for root, dirs, files in os.walk('.'):
-              # 跳过特定目录
-              skip_dirs = ['.git', 'pdf_output', '__pycache__', '.github', 'node_modules']
-              dirs[:] = [d for d in dirs if d not in skip_dirs]
-              
-              for file in files:
-                  if file.endswith('.md'):
-                      filepath = os.path.join(root, file)
-                      if process_markdown_file(filepath):
-                          processed += 1
-          
-          print(f"处理完成: {processed} 个文件")
-          EOF
-          
-          python3 convert_html.py
-      
-      - name: "修复Markdown链接格式"
-        run: |
-          cat > fix_links.py << 'EOF'
-          import os
-          import re
-          import sys
-          
-          def fix_markdown_links(content):
-              """修复Markdown中的链接格式，确保能被Pandoc正确识别"""
-              
-              # 1. 修复<a>标签转换后的格式
-              # 从 [文本](URL) 确保格式正确
-              content = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', 
-                              r'[\1](\2)', 
-                              content)
-              
-              # 2. 修复包含空格或特殊字符的URL
-              def fix_url(match):
-                  text = match.group(1)
-                  url = match.group(2)
-                  # 清理URL中的多余空格
-                  url = url.strip()
-                  # 编码URL中的特殊字符
-                  url = url.replace(' ', '%20')
-                  return f'[{text}]({url})'
-              
-              content = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', fix_url, content)
-              
-              # 3. 确保HTML实体被正确转换
-              html_entities = {
-                  '&lt;': '<',
-                  '&gt;': '>',
-                  '&amp;': '&',
-                  '&quot;': '"',
-                  '&#39;': "'",
-                  '&nbsp;': ' ',
-              }
-              
-              for entity, char in html_entities.items():
-                  content = content.replace(entity, char)
-              
-              # 4. 修复代码块中的尖括号
-              # 保护代码块不被修改
-              code_blocks = []
-              def store_code(match):
-                  code_blocks.append(match.group(0))
-                  return f'@@@CODE_{len(code_blocks)-1}@@@'
-              
-              content = re.sub(r'```[\s\S]*?```', store_code, content)
-              content = re.sub(r'~~~[\s\S]*?~~~', store_code, content)
-              
-              # 5. 在非代码块区域修复剩余的链接问题
-              lines = content.split('\n')
-              for i, line in enumerate(lines):
-                  if not line.startswith('```') and not line.startswith('~~~'):
-                      # 修复裸URL - 转换为Markdown链接
-                      urls = re.findall(r'(https?://[^\s<>"\'()]+)', line)
-                      for url in urls:
-                          # 确保这个URL没有被包裹在链接中
-                          if f'({url})' not in line:
-                              line = line.replace(url, f'[链接]({url})')
-                      lines[i] = line
-              
-              content = '\n'.join(lines)
-              
-              # 恢复代码块
-              for i, code_block in enumerate(code_blocks):
-                  placeholder = f'@@@CODE_{i}@@@'
-                  content = content.replace(placeholder, code_block)
-              
-              return content
-          
           def main():
               """处理所有Markdown文件"""
-              processed = 0
               for root, dirs, files in os.walk('.'):
-                  # 跳过特定目录
-                  skip_dirs = ['.git', 'pdf_output', '__pycache__', '.github', 'node_modules']
+                  # 跳过目录
+                  skip_dirs = ['.git', 'pdf_output', '.github', 'node_modules']
                   dirs[:] = [d for d in dirs if d not in skip_dirs]
                   
                   for file in files:
                       if file.endswith('.md'):
                           filepath = os.path.join(root, file)
                           try:
-                              with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
+                              with open(filepath, 'r', encoding='utf-8') as f:
                                   content = f.read()
                               
-                              # 修复链接
-                              fixed_content = fix_markdown_links(content)
+                              # 转换HTML为Markdown
+                              processed_content = convert_html_to_markdown(content)
                               
-                              # 保存修复后的文件
+                              # 写回文件
                               with open(filepath, 'w', encoding='utf-8') as f:
-                                  f.write(fixed_content)
+                                  f.write(processed_content)
                               
-                              print(f"✓ 已修复: {filepath}")
-                              processed += 1
+                              print(f"✓ 处理完成: {filepath}")
                           except Exception as e:
-                              print(f"✗ 修复失败 {filepath}: {e}")
-              
-              print(f"总共处理了 {processed} 个文件")
+                              print(f"✗ 处理失败 {filepath}: {e}")
           
           if __name__ == '__main__':
               main()
           EOF
           
-          python3 fix_links.py
+          python3 convert_html.py
       
-      - name: "Create LaTeX template"
+      - name: "Create optimized LaTeX template"
         run: |
           cat > header.tex << 'EOF'
           \usepackage{xeCJK}
@@ -305,9 +180,15 @@ jobs:
             urlcolor=blue,
             citecolor=blue,
             pdfborder={0 0 0},
-            breaklinks=true,  % 允许链接在行尾断开
-            unicode=true,    % 支持Unicode字符
+            breaklinks=true,
+            unicode=true,
+            pdftitle={MD40 Documentation},
+            pdfauthor={emakefun},
+            pdfsubject={MD40 Motor Driver Documentation},
+            pdfkeywords={MD40, Motor, Driver, Arduino},
           }
+          
+          \usepackage{xurl} % 允许URL在任意位置断开
           
           \usepackage{listings}
           \usepackage{xcolor}
@@ -316,13 +197,12 @@ jobs:
           \usepackage{placeins}
           \usepackage{booktabs}
           \usepackage{array}
-          \usepackage{caption} % 添加caption包用于控制图片标题
-          \usepackage{etoolbox} % 用于更灵活的控制
+          \usepackage{caption}
+          \usepackage{etoolbox}
           
           \definecolor{codebg}{rgb}{0.98,0.98,0.98}
           \definecolor{framecolor}{rgb}{0.8,0.8,0.8}
           
-          % 移除尖括号颜色设置，保持黑色
           \lstset{
             basicstyle=\ttfamily\normalsize,
             backgroundcolor=\color{codebg},
@@ -343,7 +223,6 @@ jobs:
             upquote=true,
             columns=fullflexible,
             keepspaces=true,
-            % 移除尖括号的颜色设置，保持默认黑色
           }
           
           \usepackage{parskip}
@@ -357,13 +236,13 @@ jobs:
           \usepackage{tikz}
           \usetikzlibrary{calc}
           
-          % 图片浮动控制 - 防止图片随意浮动
+          % 图片浮动控制
           \usepackage{float}
           \usepackage{placeins}
           \let\origfigure\figure
           \let\endorigfigure\endfigure
           \renewenvironment{figure}[1][]{
-            \origfigure[H]  % H表示"在这里"，强制图片在当前位置
+            \origfigure[H]
           }{
             \endorigfigure
           }
@@ -378,30 +257,29 @@ jobs:
           \setcounter{totalnumber}{20}
           \setcounter{dbltopnumber}{9}
           
-          % 完全去掉图片标题 - 不显示"图x："等任何标签
+          % 去掉图片标题
           \usepackage{caption}
           \captionsetup[figure]{
-            labelformat=empty,  % 不显示标签
-            textformat=empty,   % 不显示标题文本
+            labelformat=empty,
+            textformat=empty,
             justification=centering,
             singlelinecheck=true,
             labelsep=none,
-            skip=0pt  % 去掉标题占用的空间
+            skip=0pt
           }
           
-          % 在图片环境后添加额外处理，确保没有标题显示
-          \usepackage{etoolbox}
           \AtBeginEnvironment{figure}{%
             \captionsetup{labelformat=empty,textformat=empty}%
           }
           
-          % 表格设置 - 确保表格正常显示
+          % 表格设置
           \usepackage{booktabs}
           \usepackage{array}
           \newcolumntype{L}{>{\raggedright\arraybackslash}p{0.2\textwidth}}
           \newcolumntype{C}{>{\centering\arraybackslash}p{0.3\textwidth}}
           \newcolumntype{R}{>{\raggedleft\arraybackslash}p{0.2\textwidth}}
           
+          % 水印设置
           \newcommand\BackgroundPicture{%
             \begin{tikzpicture}[remember picture,overlay]
               \coordinate (page center) at (current page.center);
@@ -452,16 +330,13 @@ jobs:
           \renewcommand{\includegraphics}[2][]{%
             \oldincludegraphics[#1,width=\maxwidth]{#2}%
           }
-          
-          % 添加额外的宏定义，确保链接正确处理
-          \newcommand{\hrefNoBreak}[2]{\href{#1}{\nolinkurl{#2}}}
           EOF
       
       - name: "Set up output directory"
         run: |
           mkdir -p pdf_output
       
-      - name: "Convert Markdown to PDF"
+      - name: "Convert Markdown to PDF (simple and direct)"
         run: |
           MD_FILES=$(find . -name "*.md" -not -path "./.*" -not -path "*/node_modules/*" -not -path "./pdf_output/*" | sed 's/^\.\///')
           
@@ -479,50 +354,18 @@ jobs:
             dir_name=$(dirname "$md_file")
             base_name=$(basename "$md_file" .md)
             
-            # 只创建PDF输出目录
             mkdir -p "pdf_output/$dir_name"
             
-            # 获取markdown文件所在目录
+            # 获取资源路径
             md_dir=$(dirname "$md_file")
-            
-            # 构建资源路径 - 包含多个可能的位置
-            # 注意：我们首先尝试markdown文件所在目录，然后是其下的picture目录
-            # 然后是项目根目录的picture和resource目录
             resource_paths="$md_dir:$md_dir/picture:$md_dir/../picture:.:./picture:./resource"
-            
-            echo "资源路径: $resource_paths"
             
             set +e
             
-            # 转换PDF - 使用简单的设置，不压缩
             echo "开始转换PDF..."
             
-            # 创建临时文件，修复链接格式
-            tmp_md_file="$(mktemp)"
-            if [ -f "$md_file" ]; then
-              # 修复链接格式：保留Markdown链接格式，避免过度处理
-              cat "$md_file" | sed -E '
-                # 修复常见的HTML编码问题
-                s/&lt;/</g
-                s/&gt;/>/g
-                s/&amp;/&/g
-                # 修复URL编码的括号问题
-                s/%5B/[/g
-                s/%5D/]/g
-                # 修复特定的链接格式问题
-                s/https:\/\/emakefun-arduino-library\.github\.io\/em\)_/https:\/\/emakefun-arduino-library\.github\.io\/em_/g
-                s/\.\)2\.zip/)\.zip/g
-                # 修复Markdown链接中的括号转义
-                s/\\\[/[/g
-                s/\\\]/]/g
-                s/\\\(/(/g
-                s/\\\)/)/g
-                # 不要过度处理已经格式化的链接
-              ' > "$tmp_md_file"
-            fi
-            
-            # 使用Pandoc转换，添加autolink_bare_uris扩展
-            pandoc "$tmp_md_file" \
+            # 直接使用Pandoc转换，简化设置
+            pandoc "$md_file" \
               --resource-path="$resource_paths" \
               -o "pdf_output/$dir_name/$base_name.pdf" \
               --pdf-engine=xelatex \
@@ -536,20 +379,15 @@ jobs:
               -V colorlinks=true \
               -V linkcolor=blue \
               -V urlcolor=blue \
-              --wrap=auto \
+              --wrap=preserve \
               --highlight-style=tango \
-              --variable=classoption:oneside \
-              --variable=links-as-notes=true \
-              --variable=tables \
+              -V links-as-notes=false \
+              -V tables \
               --extract-media=. \
-              -f markdown+autolink_bare_uris \
-              -t latex+raw_tex \
+              --standalone \
               2>&1 | tee conversion.log
               
             conversion_status=$?
-            
-            # 清理临时文件
-            rm -f "$tmp_md_file"
             
             set -e
             
@@ -562,12 +400,19 @@ jobs:
               pdf_size=$(du -h "pdf_output/$dir_name/$base_name.pdf" | cut -f1)
               echo "PDF文件大小: $pdf_size"
               
-              # 简单验证PDF中是否包含可点击链接
-              echo "检查PDF中的链接..."
-              if pdftotext "pdf_output/$dir_name/$base_name.pdf" /dev/stdout 2>/dev/null | grep -q "http"; then
-                echo "✓ PDF中包含HTTP链接"
-              else
-                echo "⚠ PDF中未检测到HTTP链接"
+              # 验证PDF中包含可点击链接
+              echo "验证PDF中的链接..."
+              if command -v pdftotext >/dev/null 2>&1; then
+                if pdftotext "pdf_output/$dir_name/$base_name.pdf" - 2>/dev/null | grep -i -q "http"; then
+                  echo "✓ PDF中包含HTTP链接"
+                else
+                  echo "⚠ PDF中未检测到HTTP链接（可能没有链接或检测失败）"
+                fi
+              fi
+              
+              # 检查PDF是否可以正常打开（基本验证）
+              if file "pdf_output/$dir_name/$base_name.pdf" | grep -q "PDF document"; then
+                echo "✓ PDF格式验证通过"
               fi
             else
               echo "✗ 转换失败: $md_file"
@@ -575,7 +420,7 @@ jobs:
               
               if [ -f "conversion.log" ]; then
                 echo "转换日志:"
-                tail -30 conversion.log
+                tail -50 conversion.log
               fi
             fi
             
@@ -623,8 +468,8 @@ jobs:
             total_size_mb=$(find pdf_output -name "*.pdf" -type f -exec stat -c%s {} \; | awk '{sum+=$1} END {print int(sum/1024/1024)}')
             echo "PDF文件总大小: ${total_size_mb}MB"
             
-            echo "前10个最大的PDF文件:"
-            find pdf_output -name "*.pdf" -type f -exec du -h {} \; | sort -rh | head -10
+            echo "前5个最大的PDF文件:"
+            find pdf_output -name "*.pdf" -type f -exec du -h {} \; | sort -rh | head -5
           fi
       
       - name: "Create release documentation"
@@ -638,16 +483,19 @@ jobs:
           echo "# PDF 文档集" > pdf_output/README.md
           echo "" >> pdf_output/README.md
           echo "生成时间: $(date '+%Y-%m-%d %H:%M:%S')" >> pdf_output/README.md
-          echo "已优化HTML标签处理，支持图片和链接" >> pdf_output/README.md
-          echo "代码块带边框，自动换行" >> pdf_output/README.md
-          echo "添加平铺式 'emakefun' 水印" >> pdf_output/README.md
-          echo "包含resource目录中的程序文件" >> pdf_output/README.md
-          echo "优化图片位置控制，确保图片在正确位置" >> pdf_output/README.md
-          echo "支持表格内图片正常显示" >> pdf_output/README.md
-          echo "图片下方不显示任何标题标签（完全去掉'图x：'）" >> pdf_output/README.md
-          echo "代码块中尖括号保持黑色显示" >> pdf_output/README.md
-          echo "修复链接转换问题，正确显示可点击链接" >> pdf_output/README.md
-          echo "修复代码块异常问题" >> pdf_output/README.md
+          echo "版本: $TAG_NAME" >> pdf_output/README.md
+          echo "" >> pdf_output/README.md
+          echo "## 特性" >> pdf_output/README.md
+          echo "" >> pdf_output/README.md
+          echo "- 正确转换HTML链接为可点击的PDF链接" >> pdf_output/README.md
+          echo "- 代码块带边框，自动换行" >> pdf_output/README.md
+          echo "- 添加平铺式 'emakefun' 水印" >> pdf_output/README.md
+          echo "- 包含resource目录中的程序文件" >> pdf_output/README.md
+          echo "- 优化图片位置控制，确保图片在正确位置" >> pdf_output/README.md
+          echo "- 支持表格内图片正常显示" >> pdf_output/README.md
+          echo "- 图片下方不显示任何标题标签" >> pdf_output/README.md
+          echo "- 代码块中尖括号保持黑色显示" >> pdf_output/README.md
+          echo "- 修复了链接转换问题" >> pdf_output/README.md
           echo "" >> pdf_output/README.md
           
           echo "## 文件列表" >> pdf_output/README.md
