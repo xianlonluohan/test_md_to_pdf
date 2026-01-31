@@ -1,4 +1,4 @@
-name: "Markdown to PDF Converter with Tiled Watermark"
+name: "Markdown to PDF Converter with Tiled Watermark - Optimized"
 
 on:
   push:
@@ -44,7 +44,7 @@ jobs:
           
           pip3 install beautifulsoup4
       
-      - name: "Create improved HTML converter with position tracking"
+      - name: "Create HTML to Markdown converter"
         run: |
           cat > convert_html.py << 'EOF'
           import os
@@ -52,92 +52,37 @@ jobs:
           import sys
           
           def convert_html_to_markdown(content, file_path):
-              """将HTML标签转换为Markdown格式，保留图片位置"""
+              """将HTML标签转换为Markdown格式"""
               
-              # 记录图片在文档中的位置
-              img_positions = []
-              
-              # 首先处理图片标签，用占位符替换
+              # 处理图片标签
               img_pattern = re.compile(r'<img\s+([^>]+)>', re.IGNORECASE)
               
-              def img_replace(match):
+              def replace_img_tag(match):
                   attrs_str = match.group(1)
                   
                   # 提取属性
                   src_match = re.search(r'src\s*=\s*["\']([^"\']+)["\']', attrs_str)
                   alt_match = re.search(r'alt\s*=\s*["\']([^"\']*)["\']', attrs_str)
+                  width_match = re.search(r'width\s*=\s*["\']([^"\']*)["\']', attrs_str)
                   
                   src = src_match.group(1) if src_match else ''
                   alt = alt_match.group(1) if alt_match else ''
+                  width = width_match.group(1) if width_match else ''
                   
-                  # 清理src路径
+                  # 清理src路径 - 移除开头的./或/
                   if src:
                       src = re.sub(r'^\./', '', src)
                       src = re.sub(r'^/', '', src)
                   
-                  # 生成唯一的占位符
-                  placeholder = f'__IMG_PLACEHOLDER_{len(img_positions)}__'
-                  img_positions.append((placeholder, src, alt))
+                  # 如果有width属性，添加大小控制
+                  size_attr = ''
+                  if width:
+                      size_attr = f' ={width}x'
                   
-                  return placeholder
+                  # 返回Markdown图片格式
+                  return f'![{alt}]({src}{size_attr})'
               
-              # 用占位符替换所有图片
-              content = img_pattern.sub(img_replace, content)
-              
-              # 处理表格 - 保持表格结构，只处理表格内的图片
-              # 匹配完整的表格
-              table_pattern = re.compile(r'<table[^>]*>(.*?)</table>', re.DOTALL | re.IGNORECASE)
-              
-              def process_table(match):
-                  table_content = match.group(1)
-                  
-                  # 处理表格内的图片
-                  def process_table_img(img_match):
-                      attrs_str = img_match.group(1)
-                      
-                      src_match = re.search(r'src\s*=\s*["\']([^"\']+)["\']', attrs_str)
-                      alt_match = re.search(r'alt\s*=\s*["\']([^"\']*)["\']', attrs_str)
-                      
-                      src = src_match.group(1) if src_match else ''
-                      alt = alt_match.group(1) if alt_match else ''
-                      
-                      # 清理src路径
-                      if src:
-                          src = re.sub(r'^\./', '', src)
-                          src = re.sub(r'^/', '', src)
-                      
-                      # 生成唯一的占位符
-                      placeholder = f'__TABLE_IMG_PLACEHOLDER_{len(img_positions)}__'
-                      img_positions.append((placeholder, src, alt))
-                      
-                      return placeholder
-                  
-                  # 替换表格内的图片
-                  table_content = re.sub(r'<img\s+([^>]+)>', process_table_img, table_content, flags=re.IGNORECASE)
-                  
-                  # 清理表格标签，转换为Markdown表格
-                  table_content = re.sub(r'<tr[^>]*>', '', table_content)
-                  table_content = re.sub(r'</tr>', '\n', table_content)
-                  table_content = re.sub(r'<td[^>]*>', '| ', table_content)
-                  table_content = re.sub(r'</td>', ' ', table_content)
-                  table_content = re.sub(r'<th[^>]*>', '| **', table_content)
-                  table_content = re.sub(r'</th>', '** ', table_content)
-                  table_content = re.sub(r'\|\s+\|', '|', table_content)
-                  table_content = re.sub(r'\s+', ' ', table_content)
-                  
-                  # 添加表头分隔线
-                  lines = table_content.strip().split('\n')
-                  if len(lines) > 0:
-                      # 统计列数
-                      first_line = lines[0]
-                      column_count = first_line.count('|') - 1
-                      if column_count > 0:
-                          separator = '|' + ' --- |' * column_count
-                          lines.insert(1, separator)
-                  
-                  return '<table>\n' + '\n'.join(lines) + '\n</table>'
-              
-              content = table_pattern.sub(process_table, content)
+              content = img_pattern.sub(replace_img_tag, content)
               
               # 处理链接标签
               link_pattern = re.compile(r'<a\s+([^>]+)>(.*?)</a>', re.IGNORECASE | re.DOTALL)
@@ -154,20 +99,11 @@ jobs:
               
               content = link_pattern.sub(replace_link_tag, content)
               
-              # 处理center标签 - 保留为LaTeX center环境
-              def process_center(match):
-                  inner_content = match.group(1)
-                  return f'\\begin{{center}}\n{inner_content}\n\\end{{center}}'
+              # 处理center标签 - 转换为居中标记
+              content = re.sub(r'<center>(.*?)</center>', r'<div align="center">\1</div>', content, flags=re.DOTALL | re.IGNORECASE)
               
-              content = re.sub(r'<center>(.*?)</center>', process_center, content, flags=re.DOTALL | re.IGNORECASE)
-              
-              # 移除其他HTML标签
+              # 移除所有其他HTML标签，保留内容
               content = re.sub(r'<[^>]+>', '', content)
-              
-              # 现在将占位符替换为Markdown图片
-              for placeholder, src, alt in img_positions:
-                  markdown_img = f'![{alt}]({src})'
-                  content = content.replace(placeholder, markdown_img)
               
               return content
           
@@ -187,8 +123,6 @@ jobs:
                   return True
               except Exception as e:
                   print(f"处理失败 {filepath}: {e}")
-                  import traceback
-                  traceback.print_exc()
                   return False
           
           # 遍历所有Markdown文件
@@ -209,7 +143,7 @@ jobs:
           
           python3 convert_html.py
       
-      - name: "Create LaTeX template with improved image handling"
+      - name: "Create optimized LaTeX template"
         run: |
           cat > header.tex << 'EOF'
           \usepackage{xeCJK}
@@ -233,8 +167,30 @@ jobs:
           \usepackage{xcolor}
           \usepackage{graphicx}
           \usepackage{float}
-          \usepackage{array}
-          \usepackage{tabularx}
+          \usepackage{placeins}  % 提供\FloatBarrier命令
+          \usepackage{caption}   % 改进的图片标题
+          
+          % 禁用图片浮动，使图片出现在确切位置
+          \usepackage{float}
+          \floatplacement{figure}{H}  % 强制图片出现在确切位置
+          \floatplacement{table}{H}   % 强制表格出现在确切位置
+          
+          % 保持表格内的图片不浮动
+          \let\oldincludegraphics\includegraphics
+          \renewcommand{\includegraphics}[2][]{%
+            \ifnum\pdfstrcmp{\@currenvir}{tabular}=0
+              \oldincludegraphics[#1,keepaspectratio]{#2}%
+            \else
+              \ifnum\pdfstrcmp{\@currenvir}{longtable}=0
+                \oldincludegraphics[#1,keepaspectratio]{#2}%
+              \else
+                \begin{figure}[H]
+                  \centering
+                  \oldincludegraphics[#1,width=\maxwidth,keepaspectratio]{#2}%
+                \end{figure}%
+              \fi
+            \fi
+          }
           
           \definecolor{codebg}{rgb}{0.98,0.98,0.98}
           \definecolor{framecolor}{rgb}{0.8,0.8,0.8}
@@ -311,34 +267,54 @@ jobs:
           \AddToShipoutPictureBG{\BackgroundPicture}
           
           % 图片处理设置
-          \graphicspath{{./}{./picture/}{./resource/}}
+          \graphicspath{{./}{./picture/}{./resource/}{./AI小智和超声波结合/resource/}}
           
           % 设置图片最大宽度为行宽
           \makeatletter
           \def\maxwidth{\ifdim\Gin@nat@width>\linewidth\linewidth\else\Gin@nat@width\fi}
           \makeatother
           
-          \let\oldincludegraphics\includegraphics
+          % 重定义图片处理，但保留表格内的处理方式
+          \let\realincludegraphics\includegraphics
           \renewcommand{\includegraphics}[2][]{%
-            \oldincludegraphics[#1,width=\maxwidth]{#2}%
+            \ifnum\pdfstrcmp{\@currenvir}{tabular}=0
+              \realincludegraphics[#1,height=2em]{#2}%
+            \else
+              \ifnum\pdfstrcmp{\@currenvir}{longtable}=0
+                \realincludegraphics[#1,height=2em]{#2}%
+              \else
+                \begin{figure}[H]
+                  \centering
+                  \realincludegraphics[#1,width=\maxwidth,keepaspectratio]{#2}%
+                \end{figure}%
+              \fi
+            \fi
           }
           
-          % 处理表格中的图片
-          \newcommand{\includegraphicsintable}[2][]{%
-            \raisebox{-0.5\height}{\includegraphics[#1]{#2}}%
-          }
+          % 改进的表格处理
+          \usepackage{array}
+          \usepackage{booktabs}
+          \usepackage{longtable}
+          \usepackage{multirow}
           
-          % 确保center环境正常工作
-          \newenvironment{markdowncenter}
-            {\begin{center}}
-            {\end{center}}
+          % 设置表格样式
+          \setlength{\heavyrulewidth}{0.5pt}
+          \setlength{\lightrulewidth}{0.3pt}
+          \setlength{\abovetopsep}{4pt}
+          \setlength{\belowbottomsep}{4pt}
+          \setlength{\aboverulesep}{0pt}
+          \setlength{\belowrulesep}{0pt}
+          
+          % 确保表格内的图片保持正确大小
+          \newcolumntype{C}{>{\centering\arraybackslash}p}
+          
           EOF
       
       - name: "Set up output directory"
         run: |
           mkdir -p pdf_output
       
-      - name: "Convert Markdown to PDF with improved settings"
+      - name: "Convert Markdown to PDF with optimized settings"
         run: |
           MD_FILES=$(find . -name "*.md" -not -path "./.*" -not -path "*/node_modules/*" -not -path "./pdf_output/*" | sed 's/^\.\///')
           
@@ -363,28 +339,30 @@ jobs:
             md_dir=$(dirname "$md_file")
             
             # 构建资源路径 - 包含多个可能的位置
-            resource_paths="$md_dir:$md_dir/picture:$md_dir/../picture:.:./picture:./resource"
+            resource_paths="$md_dir:$md_dir/picture:$md_dir/../picture:.:./picture:./resource:./AI小智和超声波结合/resource"
             
             echo "资源路径: $resource_paths"
             
-            # 预处理markdown文件，确保图片路径正确
-            temp_md="temp_$(basename $md_file)"
-            cp "$md_file" "$temp_md"
-            
-            # 修复图片路径
-            sed -i 's|!\[\(.*\)\](\([^)]*\))|![\\1](\\2)|g' "$temp_md"
+            # 检查markdown文件中提到的图片
+            echo "检查图片引用..."
+            if [ -f "$md_file" ]; then
+              echo "文件中的图片引用:"
+              grep -o '!\[.*\](.*)' "$md_file" || echo "未找到图片引用"
+            fi
             
             set +e
             
-            # 转换PDF - 使用改进的设置
+            # 转换PDF - 使用优化的设置
             echo "开始转换PDF..."
             
-            pandoc "$temp_md" \
+            # 构建pandoc转换命令，添加更多选项控制图片位置
+            pandoc "$md_file" \
               --resource-path="$resource_paths" \
               -o "pdf_output/$dir_name/$base_name.pdf" \
               --pdf-engine=xelatex \
               --listings \
               --include-in-header=header.tex \
+              --wrap=preserve \
               -V mainfont="Noto Serif CJK SC" \
               -V sansfont="Noto Sans CJK SC" \
               -V monofont="Noto Sans Mono CJK SC" \
@@ -393,10 +371,10 @@ jobs:
               -V colorlinks=true \
               -V linkcolor=blue \
               -V urlcolor=blue \
-              --wrap=auto \
               --highlight-style=tango \
-              -f markdown+raw_html \
-              --standalone \
+              -f markdown+hard_line_breaks+raw_html \
+              --table-of-contents \
+              --toc-depth=3 \
               2>&1 | tee conversion.log
               
             conversion_status=$?
@@ -411,17 +389,21 @@ jobs:
               # 检查PDF文件大小
               pdf_size=$(du -h "pdf_output/$dir_name/$base_name.pdf" | cut -f1)
               echo "PDF文件大小: $pdf_size"
+              
+              # 提取PDF中的图片数量进行验证
+              pdf_images=$(strings "pdf_output/$dir_name/$base_name.pdf" | grep -c '/Subtype /Image' || true)
+              echo "PDF中的图片数量: $pdf_images"
             else
               echo "✗ 转换失败: $md_file"
               failed_count=$((failed_count + 1))
               
               if [ -f "conversion.log" ]; then
                 echo "转换日志:"
-                tail -30 conversion.log
+                tail -50 conversion.log
               fi
             fi
             
-            rm -f "$temp_md" conversion.log 2>/dev/null || true
+            rm -f conversion.log 2>/dev/null || true
             
             echo ""
           done
@@ -448,6 +430,12 @@ jobs:
             if [ -d "$rel_dir/resource" ]; then
               echo "复制 $rel_dir/resource 到 $pdf_dir/"
               cp -r "$rel_dir/resource" "$pdf_dir/" 2>/dev/null || echo "无法复制 $rel_dir/resource"
+            fi
+            
+            # 检查并复制picture目录
+            if [ -d "$rel_dir/picture" ]; then
+              echo "复制 $rel_dir/picture 到 $pdf_dir/"
+              cp -r "$rel_dir/picture" "$pdf_dir/" 2>/dev/null || echo "无法复制 $rel_dir/picture"
             fi
           done
       
@@ -480,9 +468,8 @@ jobs:
           echo "# PDF 文档集" > pdf_output/README.md
           echo "" >> pdf_output/README.md
           echo "生成时间: $(date '+%Y-%m-%d %H:%M:%S')" >> pdf_output/README.md
-          echo "已优化HTML标签处理，支持图片和链接" >> pdf_output/README.md
-          echo "改进了图片位置处理，确保图片位置正确" >> pdf_output/README.md
-          echo "支持表格和表格内图片的正常显示" >> pdf_output/README.md
+          echo "已优化图片位置处理，确保图片出现在确切位置" >> pdf_output/README.md
+          echo "表格内图片保持正常显示" >> pdf_output/README.md
           echo "代码块带边框，自动换行" >> pdf_output/README.md
           echo "添加平铺式 'emakefun' 水印" >> pdf_output/README.md
           echo "包含resource目录中的程序文件" >> pdf_output/README.md
