@@ -163,6 +163,7 @@ jobs:
           \usepackage{placeins}
           \usepackage{booktabs}
           \usepackage{array}
+          \usepackage{caption} % 添加caption包用于控制标题
           
           \definecolor{codebg}{rgb}{0.98,0.98,0.98}
           \definecolor{framecolor}{rgb}{0.8,0.8,0.8}
@@ -228,9 +229,36 @@ jobs:
           \newcolumntype{C}{>{\centering\arraybackslash}p{0.3\textwidth}}
           \newcolumntype{R}{>{\raggedleft\arraybackslash}p{0.2\textwidth}}
           
-          % 完全去掉图片标签（包括编号和文本）
+          % 禁用图片标题显示 - 去掉"图x："和标签文本
           \usepackage{caption}
-          \captionsetup[figure]{labelformat=empty,textformat=empty}  % 去掉图片标签和文本
+          \DeclareCaptionLabelFormat{nolabel}{}
+          \captionsetup[figure]{labelformat=nolabel,textfont=it,labelfont=bf}
+          \setlength{\abovecaptionskip}{0pt}
+          \setlength{\belowcaptionskip}{10pt}
+          
+          % 如果不想显示任何标题文本，可以取消下面这行的注释
+          % \captionsetup[figure]{labelformat=empty,textformat=empty}
+          
+          % 或者，如果想要完全移除标题区域，可以使用以下方法：
+          \makeatletter
+          \long\def\@makecaption#1#2{%
+            \ifx\@captype\@undefined
+            \else
+              \ifx\@captype\ftype@figure
+                % 对于图片，不显示标题
+              \else
+                \vskip\abovecaptionskip
+                \sbox\@tempboxa{#1: #2}%
+                \ifdim \wd\@tempboxa >\hsize
+                  #1: #2\par
+                \else
+                  \global \@minipagefalse
+                  \hb@xt@\hsize{\hfil\box\@tempboxa\hfil}%
+                \fi
+                \vskip\belowcaptionskip
+              \fi
+            \fi}
+          \makeatother
           
           \newcommand\BackgroundPicture{%
             \begin{tikzpicture}[remember picture,overlay]
@@ -352,7 +380,6 @@ jobs:
               --variable=classoption:oneside \
               --variable=links-as-notes=true \
               --variable=tables \
-              --variable=figure-caption=false \  # 禁用图片标题
               -f markdown \
               -t latex+raw_tex \
               2>&1 | tee conversion.log
@@ -444,7 +471,7 @@ jobs:
           echo "包含resource目录中的程序文件" >> pdf_output/README.md
           echo "优化图片位置控制，确保图片在正确位置" >> pdf_output/README.md
           echo "支持表格内图片正常显示" >> pdf_output/README.md
-          echo "完全去除图片下方的标签（包括图x：和标签文本）" >> pdf_output/README.md
+          echo "已移除图片下方的标签文本（图x: 和标签名）" >> pdf_output/README.md
           echo "" >> pdf_output/README.md
           
           echo "## 文件列表" >> pdf_output/README.md
