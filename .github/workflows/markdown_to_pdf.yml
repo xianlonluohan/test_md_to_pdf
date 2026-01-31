@@ -228,9 +228,9 @@ jobs:
           \newcolumntype{C}{>{\centering\arraybackslash}p{0.3\textwidth}}
           \newcolumntype{R}{>{\raggedleft\arraybackslash}p{0.2\textwidth}}
           
-          % 去掉图片标签（图x：xxx）
+          % 完全去掉图片标签（包括编号和文本）
           \usepackage{caption}
-          \captionsetup[figure]{labelformat=empty}  % 去掉图片标签
+          \captionsetup[figure]{labelformat=empty,textformat=empty}  % 去掉图片标签和文本
           
           \newcommand\BackgroundPicture{%
             \begin{tikzpicture}[remember picture,overlay]
@@ -352,6 +352,7 @@ jobs:
               --variable=classoption:oneside \
               --variable=links-as-notes=true \
               --variable=tables \
+              --variable=figure-caption=false \  # 禁用图片标题
               -f markdown \
               -t latex+raw_tex \
               2>&1 | tee conversion.log
@@ -443,7 +444,7 @@ jobs:
           echo "包含resource目录中的程序文件" >> pdf_output/README.md
           echo "优化图片位置控制，确保图片在正确位置" >> pdf_output/README.md
           echo "支持表格内图片正常显示" >> pdf_output/README.md
-          echo "已去除图片下方的标签（图x：xxx）" >> pdf_output/README.md
+          echo "完全去除图片下方的标签（包括图x：和标签文本）" >> pdf_output/README.md
           echo "" >> pdf_output/README.md
           
           echo "## 文件列表" >> pdf_output/README.md
