@@ -378,6 +378,8 @@ jobs:
           converted_count=0
           failed_count=0
           
+          CURRENT_DATE=$(date '+%Y-%m-%d')
+          
           for md_file in $MD_FILES; do
             [ -z "$md_file" ] && continue
             
@@ -412,7 +414,7 @@ jobs:
             # 转换PDF - 使用增强设置
             echo "开始转换PDF..."
             
-            # 构建Pandoc命令，添加更多控制选项
+            # 构建Pandoc命令，修复参数错误
             pandoc "$md_file" \
               --resource-path="$resource_paths" \
               -o "pdf_output/$dir_name/$base_name.pdf" \
@@ -430,8 +432,7 @@ jobs:
               --wrap=auto \
               --highlight-style=tango \
               -f markdown \
-              --toc-depth=0 \  # 不生成目录
-              -M date="`date '+%Y-%m-%d'`" \
+              -M date="$CURRENT_DATE" \
               2>&1 | tee conversion.log
               
             conversion_status=$?
