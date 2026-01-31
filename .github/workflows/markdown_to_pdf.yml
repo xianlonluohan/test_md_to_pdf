@@ -40,56 +40,94 @@ jobs:
             lmodern \
             tree \
             jq \
-            python3-pip \
-            poppler-utils  # 添加PDF工具
+            python3-pip
           
           pip3 install beautifulsoup4
       
-      - name: "Preprocess Markdown files - Clean up HTML links"
+      - name: "Create HTML to Markdown converter"
         run: |
-          echo "清理Markdown文件中的HTML链接，确保正确转换为Markdown格式..."
-          
-          # 创建预处理脚本
-          cat > preprocess_links.py << 'EOF'
+          cat > convert_html.py << 'EOF'
           import os
           import re
           import sys
           
-          def clean_html_links(content):
-              """清理HTML链接，确保正确转换为Markdown格式"""
+          def convert_html_to_markdown(content, file_path):
+              """将HTML标签转换为Markdown格式"""
               
-              # 保护代码块
+              # 首先保护代码块，防止处理代码块内的内容
               code_blocks = []
               def store_code_block(match):
                   code_blocks.append(match.group(0))
                   return f'@@@CODE_BLOCK_{len(code_blocks)-1}@@@'
               
+              # 保护代码块
               content = re.sub(r'```[\s\S]*?```', store_code_block, content)
               content = re.sub(r'~~~[\s\S]*?~~~', store_code_block, content)
               
-              # 处理所有<a>标签 - 更健壮的正则表达式
-              # 匹配 <a href="..." [other attributes]>text</a>
-              a_pattern = re.compile(r'<a\s+([^>]+)>([^<]+)</a>', re.IGNORECASE | re.DOTALL)
+              # 处理链接标签 - 重点修复部分
+              # 处理<a>标签，确保正确转换为Markdown链接
+              a_pattern = re.compile(r'<a\s+([^>]+)>([^<]+)</a>', re.IGNORECASE)
               
               def replace_a_tag(match):
                   attrs_str = match.group(1)
-                  link_text = match.group(2).strip()
+                  link_text = match.group(2)
                   
-                  # 提取href属性，忽略其他属性如download, target等
+                  # 提取href属性
                   href_match = re.search(r'href\s*=\s*["\']([^"\']+)["\']', attrs_str, re.IGNORECASE)
-                  if not href_match:
-                      return match.group(0)  # 如果没有href，保持原样
                   
-                  href = href_match.group(1)
-                  
-                  # 清理href
-                  href = re.sub(r'^\./', '', href)
-                  href = re.sub(r'^/', '', href)
-                  
-                  # 返回纯净的Markdown链接
-                  return f'[{link_text}]({href})'
+                  if href_match:
+                      href = href_match.group(1)
+                      # 清理href路径
+                      href = re.sub(r'^\./', '', href)
+                      href = re.sub(r'^/', '', href)
+                      return f'[{link_text}]({href})'
+                  else:
+                      # 如果没有href，保持原样
+                      return match.group(0)
               
               content = a_pattern.sub(replace_a_tag, content)
+              
+              # 处理带target属性的<a>标签
+              a_target_pattern = re.compile(r'<a\s+([^>]+)target="_blank"([^>]+)>([^<]+)</a>', re.IGNORECASE)
+              
+              def replace_a_target_tag(match):
+                  attrs_part1 = match.group(1)
+                  attrs_part2 = match.group(2)
+                  link_text = match.group(3)
+                  attrs_str = attrs_part1 + attrs_part2
+                  
+                  href_match = re.search(r'href\s*=\s*["\']([^"\']+)["\']', attrs_str, re.IGNORECASE)
+                  
+                  if href_match:
+                      href = href_match.group(1)
+                      href = re.sub(r'^\./', '', href)
+                      href = re.sub(r'^/', '', href)
+                      return f'[{link_text}]({href})'
+                  else:
+                      return match.group(0)
+              
+              content = a_target_pattern.sub(replace_a_target_tag, content)
+              
+              # 处理带download属性的<a>标签
+              a_download_pattern = re.compile(r'<a\s+([^>]+)download([^>]+)>([^<]+)</a>', re.IGNORECASE)
+              
+              def replace_a_download_tag(match):
+                  attrs_part1 = match.group(1)
+                  attrs_part2 = match.group(2)
+                  link_text = match.group(3)
+                  attrs_str = attrs_part1 + attrs_part2
+                  
+                  href_match = re.search(r'href\s*=\s*["\']([^"\']+)["\']', attrs_str, re.IGNORECASE)
+                  
+                  if href_match:
+                      href = href_match.group(1)
+                      href = re.sub(r'^\./', '', href)
+                      href = re.sub(r'^/', '', href)
+                      return f'[{link_text}]({href})'
+                  else:
+                      return match.group(0)
+              
+              content = a_download_pattern.sub(replace_a_download_tag, content)
               
               # 处理图片标签
               img_pattern = re.compile(r'<img\s+([^>]+)>', re.IGNORECASE)
@@ -97,12 +135,14 @@ jobs:
               def replace_img_tag(match):
                   attrs_str = match.group(1)
                   
+                  # 提取属性
                   src_match = re.search(r'src\s*=\s*["\']([^"\']+)["\']', attrs_str)
                   alt_match = re.search(r'alt\s*=\s*["\']([^"\']*)["\']', attrs_str)
                   
                   src = src_match.group(1) if src_match else ''
                   alt = alt_match.group(1) if alt_match else ''
                   
+                  # 清理src路径
                   if src:
                       src = re.sub(r'^\./', '', src)
                       src = re.sub(r'^/', '', src)
@@ -111,11 +151,29 @@ jobs:
               
               content = img_pattern.sub(replace_img_tag, content)
               
-              # 移除center标签但保留内容
+              # 处理center标签
               content = re.sub(r'<center>(.*?)</center>', r'\1', content, flags=re.DOTALL | re.IGNORECASE)
               
-              # 移除其他HTML标签（保留基本标签）
-              content = re.sub(r'<(?!\/?(?:a|img|center|br|p|div|span|table|tr|td|th|ul|ol|li|strong|em|b|i|u|h[1-6]|code|pre)\b)[^>]+>', '', content, flags=re.IGNORECASE)
+              # 处理表格标签
+              content = re.sub(r'<table>', '| ', content)
+              content = re.sub(r'</table>', '', content)
+              content = re.sub(r'<tr>', '', content)
+              content = re.sub(r'</tr>', ' |\n', content)
+              content = re.sub(r'<td>', ' | ', content)
+              content = re.sub(r'</td>', '', content)
+              
+              # 修复头文件包含问题
+              content = re.sub(r'#include\s+([^<>\s][^\s]*)(?!\s*>)', r'#include <\1>', content)
+              
+              # 处理LaTeX数学公式
+              content = re.sub(r'\\\(', r'$', content)
+              content = re.sub(r'\\\)', r'$', content)
+              
+              # 移除其他HTML标签
+              content = re.sub(r'<[^>]+>', '', content)
+              
+              # 修复Markdown链接格式
+              content = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', r'[\1](\2)', content)
               
               # 恢复代码块
               for i, code_block in enumerate(code_blocks):
@@ -124,7 +182,26 @@ jobs:
               
               return content
           
-          # 处理所有Markdown文件
+          def process_markdown_file(filepath):
+              print(f"处理文件: {filepath}")
+              try:
+                  with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
+                      content = f.read()
+                  
+                  # 转换HTML为Markdown
+                  processed_content = convert_html_to_markdown(content, filepath)
+                  
+                  # 保存处理后的文件
+                  with open(filepath, 'w', encoding='utf-8') as f:
+                      f.write(processed_content)
+                      
+                  return True
+              except Exception as e:
+                  print(f"处理失败 {filepath}: {e}")
+                  return False
+          
+          # 遍历所有Markdown文件
+          processed = 0
           for root, dirs, files in os.walk('.'):
               # 跳过特定目录
               skip_dirs = ['.git', 'pdf_output', '__pycache__', '.github', 'node_modules']
@@ -133,25 +210,13 @@ jobs:
               for file in files:
                   if file.endswith('.md'):
                       filepath = os.path.join(root, file)
-                      try:
-                          with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
-                              content = f.read()
-                          
-                          # 清理HTML链接
-                          cleaned_content = clean_html_links(content)
-                          
-                          # 写回文件
-                          with open(filepath, 'w', encoding='utf-8') as f:
-                              f.write(cleaned_content)
-                          
-                          print(f"已处理: {filepath}")
-                      except Exception as e:
-                          print(f"处理失败 {filepath}: {e}")
+                      if process_markdown_file(filepath):
+                          processed += 1
           
-          print("链接清理完成")
+          print(f"处理完成: {processed} 个文件")
           EOF
           
-          python3 preprocess_links.py
+          python3 convert_html.py
       
       - name: "Create LaTeX template"
         run: |
@@ -182,6 +247,7 @@ jobs:
             bookmarksnumbered=true,
             pdfstartview=FitH,
             pdfpagemode=UseOutlines,
+            breaklinks=true, % 允许链接在行内换行
           }
           
           \usepackage{listings}
@@ -197,7 +263,7 @@ jobs:
           \definecolor{codebg}{rgb}{0.98,0.98,0.98}
           \definecolor{framecolor}{rgb}{0.8,0.8,0.8}
           
-          % 代码块设置 - 保持尖括号为黑色
+          % 代码块设置
           \lstset{
             basicstyle=\ttfamily\normalsize,
             backgroundcolor=\color{codebg},
@@ -218,7 +284,6 @@ jobs:
             upquote=true,
             columns=fullflexible,
             keepspaces=true,
-            % 移除尖括号的颜色设置，保持默认黑色
           }
           
           \usepackage{parskip}
@@ -327,13 +392,26 @@ jobs:
           \renewcommand{\includegraphics}[2][]{%
             \oldincludegraphics[#1,width=\maxwidth]{#2}%
           }
+          
+          % 防止Pandoc为链接添加数字后缀
+          \usepackage{url}
+          \def\UrlBreaks{\do\/\do-}
+          
+          % 自定义链接格式，避免数字后缀
+          \makeatletter
+          \def\hyper@link@#1#2{%
+            \begingroup
+              \Hy@colorlink{#1}#2\endlinkcolor
+            \endgroup
+          }
+          \makeatother
           EOF
       
       - name: "Set up output directory"
         run: |
           mkdir -p pdf_output
       
-      - name: "Convert Markdown to PDF - Simple method"
+      - name: "Convert Markdown to PDF"
         run: |
           MD_FILES=$(find . -name "*.md" -not -path "./.*" -not -path "*/node_modules/*" -not -path "./pdf_output/*" | sed 's/^\.\///')
           
@@ -364,14 +442,30 @@ jobs:
             
             echo "开始转换PDF..."
             
-            # 方法1: 使用简单的Pandoc转换，不添加额外参数
-            echo "使用方法1: 简单Pandoc转换..."
+            # 创建临时文件，修复链接格式
+            tmp_md_file="$(mktemp)"
+            if [ -f "$md_file" ]; then
+              # 修复链接格式，确保链接正确
+              cat "$md_file" | sed -E '
+                # 修复链接中的常见问题
+                s/\[([^\]]+)\]\(([^)]+)\)[0-9]+/[\1](\2)/g
+                s/\(https:\/\/emakefun-arduino-library\.github\.io\/em\)_\)/(https:\/\/emakefun-arduino-library\.github\.io\/em_)/g
+                s/\.\)2\.zip/)\.zip/g
+                # 确保链接格式正确
+                s|(https?://[^\s<>"'\''()]+)|[链接](\1)|g
+              ' > "$tmp_md_file"
+              
+              # 检查修复后的文件
+              echo "修复后的文件前几行:"
+              head -20 "$tmp_md_file"
+            fi
             
-            # 使用简单的Pandoc命令，避免链接被转换为脚注
-            pandoc "$md_file" \
+            # 使用Pandoc转换，禁用链接编号
+            pandoc "$tmp_md_file" \
               --resource-path="$resource_paths" \
-              -o "pdf_output/$dir_name/${base_name}_method1.pdf" \
+              -o "pdf_output/$dir_name/$base_name.pdf" \
               --pdf-engine=xelatex \
+              --listings \
               --include-in-header=header.tex \
               -V mainfont="Noto Serif CJK SC" \
               -V sansfont="Noto Sans CJK SC" \
@@ -382,179 +476,54 @@ jobs:
               -V linkcolor=blue \
               -V urlcolor=blue \
               --wrap=auto \
-              -f markdown-auto_identifiers \
-              -t latex \
-              --standalone \
-              2>&1 | tee conversion.log
-            
-            # 方法2: 使用listings包和更简单的设置
-            echo "使用方法2: 带listings的转换..."
-            
-            # 创建简化版header
-            cat > header_simple.tex << 'EOF'
-          \usepackage{xeCJK}
-          \usepackage[UTF8]{ctex}
-          \setCJKmainfont{Noto Serif CJK SC}
-          \setCJKsansfont{Noto Sans CJK SC}
-          \setCJKmonofont{Noto Sans Mono CJK SC}
-          
-          \usepackage[margin=1.2in]{geometry}
-          
-          \usepackage{hyperref}
-          \hypersetup{
-            colorlinks=true,
-            linkcolor=blue,
-            urlcolor=blue,
-            citecolor=blue,
-            pdfborder={0 0 0},
-          }
-          
-          \usepackage{listings}
-          \usepackage{xcolor}
-          \usepackage{graphicx}
-          \usepackage{float}
-          
-          \definecolor{codebg}{rgb}{0.98,0.98,0.98}
-          \definecolor{framecolor}{rgb}{0.8,0.8,0.8}
-          
-          \lstset{
-            basicstyle=\ttfamily\normalsize,
-            backgroundcolor=\color{codebg},
-            frame=single,
-            framesep=6pt,
-            framerule=0.8pt,
-            rulecolor=\color{framecolor},
-            breaklines=true,
-            showstringspaces=false,
-            tabsize=2,
-            numbers=none,
-          }
-          
-          \usepackage{eso-pic}
-          \usepackage{tikz}
-          \usetikzlibrary{calc}
-          
-          \newcommand\BackgroundPicture{%
-            \begin{tikzpicture}[remember picture,overlay]
-              \coordinate (page center) at (current page.center);
-              \pgfmathsetmacro{\pagewidth}{\paperwidth}
-              \pgfmathsetmacro{\pageheight}{\paperheight}
-              
-              \pgfmathsetmacro{\hcount}{3}
-              \pgfmathsetmacro{\vcount}{5}
-              \pgfmathsetmacro{\hspace}{\paperwidth/(\hcount+1)}
-              \pgfmathsetmacro{\vspace}{\paperheight/(\vcount+1)}
-              
-              \foreach \i in {1,...,\hcount} {
-                \foreach \j in {1,...,\vcount} {
-                  \pgfmathsetmacro{\x}{-\paperwidth/2 + \i*\hspace}
-                  \pgfmathsetmacro{\y}{-\paperheight/2 + \j*\vspace}
-                  
-                  \node at ($(page center) + (\x pt, \y pt)$) [
-                    rotate=45,
-                    scale=1.5,
-                    text=gray!30,
-                    opacity=0.4,
-                    font=\sffamily\bfseries\small
-                  ] {emakefun};
-                }
-              }
-              
-              \node at (page center) [
-                rotate=45,
-                scale=3,
-                text=gray!30,
-                opacity=0.6,
-                font=\sffamily\bfseries
-              ] {emakefun};
-            \end{tikzpicture}%
-          }
-          
-          \AddToShipoutPictureBG{\BackgroundPicture}
-          
-          \graphicspath{{./}{./picture/}{./resource/}}
-          EOF
-            
-            pandoc "$md_file" \
-              --resource-path="$resource_paths" \
-              -o "pdf_output/$dir_name/${base_name}_method2.pdf" \
-              --pdf-engine=xelatex \
-              --include-in-header=header_simple.tex \
-              -V mainfont="Noto Serif CJK SC" \
-              -V sansfont="Noto Sans CJK SC" \
-              -V monofont="Noto Sans Mono CJK SC" \
-              -V geometry:margin=1.2in \
-              -V geometry:a4paper \
-              -V colorlinks=true \
-              -V linkcolor=blue \
-              -V urlcolor=blue \
+              --highlight-style=tango \
+              --variable=classoption:oneside \
+              --variable=links-as-notes=false \
+              --variable=tables \
               -f markdown \
               -t latex \
+              --latex-engine=xelatex \
               --standalone \
-              2>&1 | tee -a conversion.log
+              2>&1 | tee conversion.log
+              
+            conversion_status=$?
             
-            # 选择最好的结果
-            if [ -f "pdf_output/$dir_name/${base_name}_method1.pdf" ] && [ -s "pdf_output/$dir_name/${base_name}_method1.pdf" ]; then
-              # 检查method1是否有链接
-              if pdftotext "pdf_output/$dir_name/${base_name}_method1.pdf" - 2>/dev/null | grep -q "https://"; then
-                echo "✓ 方法1成功且有链接"
-                mv "pdf_output/$dir_name/${base_name}_method1.pdf" "pdf_output/$dir_name/$base_name.pdf"
-                rm -f "pdf_output/$dir_name/${base_name}_method2.pdf"
-              else
-                if [ -f "pdf_output/$dir_name/${base_name}_method2.pdf" ] && [ -s "pdf_output/$dir_name/${base_name}_method2.pdf" ]; then
-                  echo "✓ 使用方法2的结果"
-                  mv "pdf_output/$dir_name/${base_name}_method2.pdf" "pdf_output/$dir_name/$base_name.pdf"
-                else
-                  echo "✓ 使用方法1的结果（无链接但文件存在）"
-                  mv "pdf_output/$dir_name/${base_name}_method1.pdf" "pdf_output/$dir_name/$base_name.pdf"
-                fi
-              fi
-            elif [ -f "pdf_output/$dir_name/${base_name}_method2.pdf" ] && [ -s "pdf_output/$dir_name/${base_name}_method2.pdf" ]; then
-              echo "✓ 使用方法2的结果"
-              mv "pdf_output/$dir_name/${base_name}_method2.pdf" "pdf_output/$dir_name/$base_name.pdf"
-            else
-              echo "✗ 两种方法都失败"
-              failed_count=$((failed_count + 1))
-              rm -f conversion.log 2>/dev/null || true
-              continue
-            fi
-            
-            rm -f "pdf_output/$dir_name/${base_name}_method1.pdf" "pdf_output/$dir_name/${base_name}_method2.pdf" 2>/dev/null || true
+            # 清理临时文件
+            rm -f "$tmp_md_file"
             
             set -e
             
-            # 检查最终PDF
-            if [ -f "pdf_output/$dir_name/$base_name.pdf" ] && [ -s "pdf_output/$dir_name/$base_name.pdf" ]; then
+            # 检查转换是否成功
+            if [ $conversion_status -eq 0 ] && [ -f "pdf_output/$dir_name/$base_name.pdf" ] && [ -s "pdf_output/$dir_name/$base_name.pdf" ]; then
               echo "✓ 成功转换: $md_file"
               converted_count=$((converted_count + 1))
               
+              # 检查PDF文件大小
               pdf_size=$(du -h "pdf_output/$dir_name/$base_name.pdf" | cut -f1)
               echo "PDF文件大小: $pdf_size"
               
-              # 验证PDF内容和链接
-              echo "检查PDF内容..."
-              
-              # 提取文本查看是否有链接
-              pdf_text=$(pdftotext "pdf_output/$dir_name/$base_name.pdf" - 2>/dev/null || echo "")
-              
-              if echo "$pdf_text" | grep -q -E 'https?://'; then
-                echo "✓ PDF中包含URL链接"
+              # 验证链接是否可点击
+              echo "检查PDF链接..."
+              if strings "pdf_output/$dir_name/$base_name.pdf" | grep -q "/URI"; then
+                echo "✓ PDF中包含超链接"
               else
-                echo "⚠ PDF中可能不包含URL链接（或格式不同）"
-              fi
-              
-              # 检查PDF是否可以正常打开
-              if pdftoppm "pdf_output/$dir_name/$base_name.pdf" -png -singlefile -f 1 -l 1 "pdf_output/$dir_name/${base_name}_preview" 2>/dev/null; then
-                echo "✓ PDF可以正常渲染"
-                rm -f "pdf_output/$dir_name/${base_name}_preview-1.png" 2>/dev/null || true
+                echo "⚠ PDF中可能没有超链接"
+                # 尝试另一种检查方法
+                if pdftotext "pdf_output/$dir_name/$base_name.pdf" - 2>/dev/null | grep -q "https://"; then
+                  echo "⚠ PDF中有URL文本，但可能不是可点击链接"
+                fi
               fi
             else
-              echo "✗ 最终PDF文件不存在或为空"
+              echo "✗ 转换失败: $md_file"
               failed_count=$((failed_count + 1))
+              
+              if [ -f "conversion.log" ]; then
+                echo "转换日志:"
+                tail -30 conversion.log
+              fi
             fi
             
             rm -f conversion.log 2>/dev/null || true
-            rm -f header_simple.tex 2>/dev/null || true
             
             echo ""
           done
@@ -572,10 +541,12 @@ jobs:
         run: |
           echo "复制resource目录到输出目录..."
           
+          # 查找所有有PDF文件的目录，复制对应的resource目录
           find pdf_output -name "*.pdf" -type f | while read pdf_file; do
             pdf_dir=$(dirname "$pdf_file")
             rel_dir=${pdf_dir#pdf_output/}
             
+            # 如果原始目录下有resource目录，则复制到输出目录
             if [ -d "$rel_dir/resource" ]; then
               echo "复制 $rel_dir/resource 到 $pdf_dir/"
               cp -r "$rel_dir/resource" "$pdf_dir/" 2>/dev/null || echo "无法复制 $rel_dir/resource"
@@ -592,26 +563,26 @@ jobs:
           else
             echo "总共生成 $total_pdfs 个PDF文件"
             
+            # 显示总大小
             total_size_mb=$(find pdf_output -name "*.pdf" -type f -exec stat -c%s {} \; | awk '{sum+=$1} END {print int(sum/1024/1024)}')
             echo "PDF文件总大小: ${total_size_mb}MB"
             
             echo "前10个最大的PDF文件:"
             find pdf_output -name "*.pdf" -type f -exec du -h {} \; | sort -rh | head -10
             
+            # 检查几个示例PDF是否有链接
             echo ""
-            echo "检查几个示例PDF的链接状态:"
+            echo "检查示例PDF的链接状态:"
             sample_pdfs=$(find pdf_output -name "*.pdf" -type f | head -3)
             for pdf in $sample_pdfs; do
               echo "检查 $pdf:"
-              if pdftotext "$pdf" - 2>/dev/null | grep -q -E 'https?://'; then
-                echo "  ✓ 包含URL链接"
+              if strings "$pdf" | grep -q "/URI"; then
+                echo "  ✓ 包含超链接"
+                # 提取链接示例
+                echo "  链接示例:"
+                strings "$pdf" | grep -E "https?://" | head -3
               else
-                # 检查是否有Markdown格式的链接
-                if pdftotext "$pdf" - 2>/dev/null | grep -q '\[.*\](.*)'; then
-                  echo "  ⚠ 包含Markdown格式链接但不一定是可点击的"
-                else
-                  echo "  ⚠ 可能没有超链接"
-                fi
+                echo "  ⚠ 可能没有超链接"
               fi
             done
           fi
@@ -627,7 +598,7 @@ jobs:
           echo "# PDF 文档集" > pdf_output/README.md
           echo "" >> pdf_output/README.md
           echo "生成时间: $(date '+%Y-%m-%d %H:%M:%S')" >> pdf_output/README.md
-          echo "已优化HTML链接处理，避免链接被转换为脚注" >> pdf_output/README.md
+          echo "已优化HTML标签处理，支持图片和链接" >> pdf_output/README.md
           echo "代码块带边框，自动换行" >> pdf_output/README.md
           echo "添加平铺式 'emakefun' 水印" >> pdf_output/README.md
           echo "包含resource目录中的程序文件" >> pdf_output/README.md
@@ -636,7 +607,8 @@ jobs:
           echo "图片下方不显示任何标题标签（完全去掉'图x：'）" >> pdf_output/README.md
           echo "代码块中尖括号保持黑色显示" >> pdf_output/README.md
           echo "修复链接转换问题，正确显示可点击的蓝色链接" >> pdf_output/README.md
-          echo "使用预处理步骤确保HTML链接正确转换为Markdown格式" >> pdf_output/README.md
+          echo "修复链接数字后缀问题，确保链接文本干净" >> pdf_output/README.md
+          echo "修复代码块异常问题" >> pdf_output/README.md
           echo "" >> pdf_output/README.md
           
           echo "## 文件列表" >> pdf_output/README.md
@@ -659,6 +631,7 @@ jobs:
               fi
             fi
             
+            # 检查是否有resource目录
             pdf_dir=$(dirname "$pdf_file")
             resource_exists=""
             if [ -d "$pdf_dir/resource" ]; then
@@ -671,6 +644,7 @@ jobs:
           echo "" >> pdf_output/README.md
           total_size_mb=$(find pdf_output -name "*.pdf" -type f -exec stat -c%s {} \; | awk '{sum+=$1} END {print int(sum/1024/1024)}')
           
+          # 统计有resource目录的PDF数量
           resource_dirs_count=$(find pdf_output -type d -name "resource" 2>/dev/null | wc -l)
           
           echo "总计: $PDF_COUNT 个 PDF 文件, 总大小约 ${total_size_mb}MB, ${resource_dirs_count} 个目录包含resource资源" >> pdf_output/README.md
