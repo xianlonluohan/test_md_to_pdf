@@ -1,4 +1,4 @@
-name: "Markdown to PDF Converter with Tiled Watermark - Optimized"
+name: "Markdown to PDF Converter with Tiled Watermark"
 
 on:
   push:
@@ -63,24 +63,17 @@ jobs:
                   # 提取属性
                   src_match = re.search(r'src\s*=\s*["\']([^"\']+)["\']', attrs_str)
                   alt_match = re.search(r'alt\s*=\s*["\']([^"\']*)["\']', attrs_str)
-                  width_match = re.search(r'width\s*=\s*["\']([^"\']*)["\']', attrs_str)
                   
                   src = src_match.group(1) if src_match else ''
                   alt = alt_match.group(1) if alt_match else ''
-                  width = width_match.group(1) if width_match else ''
                   
                   # 清理src路径 - 移除开头的./或/
                   if src:
                       src = re.sub(r'^\./', '', src)
                       src = re.sub(r'^/', '', src)
                   
-                  # 如果有width属性，添加大小控制
-                  size_attr = ''
-                  if width:
-                      size_attr = f' ={width}x'
-                  
                   # 返回Markdown图片格式
-                  return f'![{alt}]({src}{size_attr})'
+                  return f'![{alt}]({src})'
               
               content = img_pattern.sub(replace_img_tag, content)
               
@@ -99,8 +92,8 @@ jobs:
               
               content = link_pattern.sub(replace_link_tag, content)
               
-              # 处理center标签 - 转换为居中标记
-              content = re.sub(r'<center>(.*?)</center>', r'<div align="center">\1</div>', content, flags=re.DOTALL | re.IGNORECASE)
+              # 处理center标签 - 移除即可
+              content = re.sub(r'<center>(.*?)</center>', r'\1', content, flags=re.DOTALL | re.IGNORECASE)
               
               # 移除所有其他HTML标签，保留内容
               content = re.sub(r'<[^>]+>', '', content)
@@ -143,7 +136,7 @@ jobs:
           
           python3 convert_html.py
       
-      - name: "Create optimized LaTeX template"
+      - name: "Create LaTeX template"
         run: |
           cat > header.tex << 'EOF'
           \usepackage{xeCJK}
@@ -167,30 +160,9 @@ jobs:
           \usepackage{xcolor}
           \usepackage{graphicx}
           \usepackage{float}
-          \usepackage{placeins}  % 提供\FloatBarrier命令
-          \usepackage{caption}   % 改进的图片标题
-          
-          % 禁用图片浮动，使图片出现在确切位置
-          \usepackage{float}
-          \floatplacement{figure}{H}  % 强制图片出现在确切位置
-          \floatplacement{table}{H}   % 强制表格出现在确切位置
-          
-          % 保持表格内的图片不浮动
-          \let\oldincludegraphics\includegraphics
-          \renewcommand{\includegraphics}[2][]{%
-            \ifnum\pdfstrcmp{\@currenvir}{tabular}=0
-              \oldincludegraphics[#1,keepaspectratio]{#2}%
-            \else
-              \ifnum\pdfstrcmp{\@currenvir}{longtable}=0
-                \oldincludegraphics[#1,keepaspectratio]{#2}%
-              \else
-                \begin{figure}[H]
-                  \centering
-                  \oldincludegraphics[#1,width=\maxwidth,keepaspectratio]{#2}%
-                \end{figure}%
-              \fi
-            \fi
-          }
+          \usepackage{placeins}
+          \usepackage{booktabs}
+          \usepackage{array}
           
           \definecolor{codebg}{rgb}{0.98,0.98,0.98}
           \definecolor{framecolor}{rgb}{0.8,0.8,0.8}
@@ -227,6 +199,34 @@ jobs:
           \usepackage{eso-pic}
           \usepackage{tikz}
           \usetikzlibrary{calc}
+          
+          % 图片浮动控制 - 防止图片随意浮动
+          \usepackage{float}
+          \usepackage{placeins}
+          \let\origfigure\figure
+          \let\endorigfigure\endfigure
+          \renewenvironment{figure}[1][]{
+            \origfigure[H]  % H表示"在这里"，强制图片在当前位置
+          }{
+            \endorigfigure
+          }
+          
+          % 防止图片和表格过度浮动
+          \renewcommand{\topfraction}{.85}
+          \renewcommand{\bottomfraction}{.7}
+          \renewcommand{\textfraction}{.15}
+          \renewcommand{\floatpagefraction}{.66}
+          \setcounter{topnumber}{9}
+          \setcounter{bottomnumber}{9}
+          \setcounter{totalnumber}{20}
+          \setcounter{dbltopnumber}{9}
+          
+          % 表格设置 - 确保表格正常显示
+          \usepackage{booktabs}
+          \usepackage{array}
+          \newcolumntype{L}{>{\raggedright\arraybackslash}p{0.2\textwidth}}
+          \newcolumntype{C}{>{\centering\arraybackslash}p{0.3\textwidth}}
+          \newcolumntype{R}{>{\raggedleft\arraybackslash}p{0.2\textwidth}}
           
           \newcommand\BackgroundPicture{%
             \begin{tikzpicture}[remember picture,overlay]
@@ -267,54 +267,24 @@ jobs:
           \AddToShipoutPictureBG{\BackgroundPicture}
           
           % 图片处理设置
-          \graphicspath{{./}{./picture/}{./resource/}{./AI小智和超声波结合/resource/}}
+          \graphicspath{{./}{./picture/}{./resource/}}
           
           % 设置图片最大宽度为行宽
           \makeatletter
           \def\maxwidth{\ifdim\Gin@nat@width>\linewidth\linewidth\else\Gin@nat@width\fi}
           \makeatother
           
-          % 重定义图片处理，但保留表格内的处理方式
-          \let\realincludegraphics\includegraphics
+          \let\oldincludegraphics\includegraphics
           \renewcommand{\includegraphics}[2][]{%
-            \ifnum\pdfstrcmp{\@currenvir}{tabular}=0
-              \realincludegraphics[#1,height=2em]{#2}%
-            \else
-              \ifnum\pdfstrcmp{\@currenvir}{longtable}=0
-                \realincludegraphics[#1,height=2em]{#2}%
-              \else
-                \begin{figure}[H]
-                  \centering
-                  \realincludegraphics[#1,width=\maxwidth,keepaspectratio]{#2}%
-                \end{figure}%
-              \fi
-            \fi
+            \oldincludegraphics[#1,width=\maxwidth]{#2}%
           }
-          
-          % 改进的表格处理
-          \usepackage{array}
-          \usepackage{booktabs}
-          \usepackage{longtable}
-          \usepackage{multirow}
-          
-          % 设置表格样式
-          \setlength{\heavyrulewidth}{0.5pt}
-          \setlength{\lightrulewidth}{0.3pt}
-          \setlength{\abovetopsep}{4pt}
-          \setlength{\belowbottomsep}{4pt}
-          \setlength{\aboverulesep}{0pt}
-          \setlength{\belowrulesep}{0pt}
-          
-          % 确保表格内的图片保持正确大小
-          \newcolumntype{C}{>{\centering\arraybackslash}p}
-          
           EOF
       
       - name: "Set up output directory"
         run: |
           mkdir -p pdf_output
       
-      - name: "Convert Markdown to PDF with optimized settings"
+      - name: "Convert Markdown to PDF"
         run: |
           MD_FILES=$(find . -name "*.md" -not -path "./.*" -not -path "*/node_modules/*" -not -path "./pdf_output/*" | sed 's/^\.\///')
           
@@ -339,30 +309,32 @@ jobs:
             md_dir=$(dirname "$md_file")
             
             # 构建资源路径 - 包含多个可能的位置
-            resource_paths="$md_dir:$md_dir/picture:$md_dir/../picture:.:./picture:./resource:./AI小智和超声波结合/resource"
+            # 注意：我们首先尝试markdown文件所在目录，然后是其下的picture目录
+            # 然后是项目根目录的picture和resource目录
+            resource_paths="$md_dir:$md_dir/picture:$md_dir/../picture:.:./picture:./resource"
             
             echo "资源路径: $resource_paths"
             
             # 检查markdown文件中提到的图片
             echo "检查图片引用..."
             if [ -f "$md_file" ]; then
-              echo "文件中的图片引用:"
-              grep -o '!\[.*\](.*)' "$md_file" || echo "未找到图片引用"
+              grep -o '!\[.*\](.*)' "$md_file" | head -5 | while read img; do
+                echo "  找到图片引用: $img"
+              done || true
             fi
             
             set +e
             
-            # 转换PDF - 使用优化的设置
+            # 转换PDF - 使用简单的设置，不压缩
             echo "开始转换PDF..."
             
-            # 构建pandoc转换命令，添加更多选项控制图片位置
+            # 先尝试直接转换
             pandoc "$md_file" \
               --resource-path="$resource_paths" \
               -o "pdf_output/$dir_name/$base_name.pdf" \
               --pdf-engine=xelatex \
               --listings \
               --include-in-header=header.tex \
-              --wrap=preserve \
               -V mainfont="Noto Serif CJK SC" \
               -V sansfont="Noto Sans CJK SC" \
               -V monofont="Noto Sans Mono CJK SC" \
@@ -371,10 +343,13 @@ jobs:
               -V colorlinks=true \
               -V linkcolor=blue \
               -V urlcolor=blue \
+              --wrap=auto \
               --highlight-style=tango \
-              -f markdown+hard_line_breaks+raw_html \
-              --table-of-contents \
-              --toc-depth=3 \
+              --variable=classoption:oneside \
+              --variable=links-as-notes=true \
+              --variable=tables \
+              -f markdown \
+              -t latex+raw_tex \
               2>&1 | tee conversion.log
               
             conversion_status=$?
@@ -389,17 +364,13 @@ jobs:
               # 检查PDF文件大小
               pdf_size=$(du -h "pdf_output/$dir_name/$base_name.pdf" | cut -f1)
               echo "PDF文件大小: $pdf_size"
-              
-              # 提取PDF中的图片数量进行验证
-              pdf_images=$(strings "pdf_output/$dir_name/$base_name.pdf" | grep -c '/Subtype /Image' || true)
-              echo "PDF中的图片数量: $pdf_images"
             else
               echo "✗ 转换失败: $md_file"
               failed_count=$((failed_count + 1))
               
               if [ -f "conversion.log" ]; then
                 echo "转换日志:"
-                tail -50 conversion.log
+                tail -30 conversion.log
               fi
             fi
             
@@ -430,12 +401,6 @@ jobs:
             if [ -d "$rel_dir/resource" ]; then
               echo "复制 $rel_dir/resource 到 $pdf_dir/"
               cp -r "$rel_dir/resource" "$pdf_dir/" 2>/dev/null || echo "无法复制 $rel_dir/resource"
-            fi
-            
-            # 检查并复制picture目录
-            if [ -d "$rel_dir/picture" ]; then
-              echo "复制 $rel_dir/picture 到 $pdf_dir/"
-              cp -r "$rel_dir/picture" "$pdf_dir/" 2>/dev/null || echo "无法复制 $rel_dir/picture"
             fi
           done
       
@@ -468,11 +433,12 @@ jobs:
           echo "# PDF 文档集" > pdf_output/README.md
           echo "" >> pdf_output/README.md
           echo "生成时间: $(date '+%Y-%m-%d %H:%M:%S')" >> pdf_output/README.md
-          echo "已优化图片位置处理，确保图片出现在确切位置" >> pdf_output/README.md
-          echo "表格内图片保持正常显示" >> pdf_output/README.md
+          echo "已优化HTML标签处理，支持图片和链接" >> pdf_output/README.md
           echo "代码块带边框，自动换行" >> pdf_output/README.md
           echo "添加平铺式 'emakefun' 水印" >> pdf_output/README.md
           echo "包含resource目录中的程序文件" >> pdf_output/README.md
+          echo "优化图片位置控制，确保图片在正确位置" >> pdf_output/README.md
+          echo "支持表格内图片正常显示" >> pdf_output/README.md
           echo "" >> pdf_output/README.md
           
           echo "## 文件列表" >> pdf_output/README.md
