@@ -1,4 +1,4 @@
-name: "Markdown to PDF Converter with Tiled Watermark"
+name: "Enhanced Markdown to PDF Converter"
 
 on:
   push:
@@ -40,8 +40,11 @@ jobs:
             lmodern \
             tree \
             jq \
-            python3-pip
-          
+            python3-pip \
+            tcolorbox \
+            environ \
+            mdframed
+            
           pip3 install beautifulsoup4 markdown-it-py
       
       - name: "Create enhanced HTML to Markdown converter"
@@ -119,6 +122,10 @@ jobs:
           
           def process_non_table_images(line):
               """处理非表格内的图片"""
+              # 移除图片标签文本，如"图1:alt text"
+              line = re.sub(r'(?:图\d+:)?\s*alt text', '', line)
+              line = re.sub(r'(?:图\d+:)?\s*', '', line)
+              
               # 处理HTML格式的图片 <img src="..." alt="..." width="...">
               img_pattern = re.compile(r'<img\s+([^>]+)>', re.IGNORECASE)
               
@@ -127,23 +134,16 @@ jobs:
                   
                   # 提取属性
                   src_match = re.search(r'src\s*=\s*["\']([^"\']+)["\']', attrs_str)
-                  alt_match = re.search(r'alt\s*=\s*["\']([^"\']*)["\']', attrs_str)
-                  width_match = re.search(r'width\s*=\s*["\']([^"\']+)["\']', attrs_str)
                   
                   src = src_match.group(1) if src_match else ''
-                  alt = alt_match.group(1) if alt_match else ''
-                  width = width_match.group(1) if width_match else ''
                   
                   # 清理src路径
                   if src:
                       src = re.sub(r'^\./', '', src)
                       src = re.sub(r'^/', '', src)
                   
-                  # 构建Markdown图片，添加换行确保独立段落
-                  if width:
-                      return f'\n![{alt}]({src}){{width={width}}}\n'
-                  else:
-                      return f'\n![{alt}]({src})\n'
+                  # 构建Markdown图片，添加换行确保独立段落，但去除宽度标记
+                  return f'\n![]({src})\n'
               
               # 先处理HTML格式图片
               line = img_pattern.sub(replace_img_tag, line)
@@ -152,14 +152,60 @@ jobs:
               md_img_pattern = re.compile(r'!\[([^\]]*)\]\(([^)]+)\)')
               
               def ensure_img_newlines(match):
-                  alt = match.group(1)
                   src = match.group(2)
-                  # 确保图片前后有换行，形成独立段落
-                  return f'\n![{alt}]({src})\n'
+                  # 确保图片前后有换行，形成独立段落，去除宽度标记
+                  return f'\n![]({src})\n'
               
               line = md_img_pattern.sub(ensure_img_newlines, line)
               
+              # 移除{width=800}这样的标记
+              line = re.sub(r'\{width=[^}]+\}', '', line)
+              
               return line
+          
+          def process_quote_blocks(content):
+              """处理引用块，确保格式正确"""
+              # 将>开头的行转换为Markdown引用块
+              lines = content.split('\n')
+              processed_lines = []
+              in_quote = False
+              quote_content = []
+              
+              for line in lines:
+                  stripped = line.strip()
+                  
+                  # 检查是否是引用块开始
+                  if stripped.startswith('>'):
+                      in_quote = True
+                      # 移除开头的>和空格
+                      quote_line = re.sub(r'^>\s*', '', line)
+                      quote_content.append(quote_line)
+                  elif in_quote and stripped == '':
+                      # 引用块结束
+                      if quote_content:
+                          # 添加引用块标记
+                          processed_lines.append('```quote')
+                          processed_lines.extend(quote_content)
+                          processed_lines.append('```')
+                          processed_lines.append('')
+                      quote_content = []
+                      in_quote = False
+                      processed_lines.append(line)
+                  elif in_quote:
+                      # 引用块继续
+                      quote_content.append(line)
+                  else:
+                      # 不在引用块中
+                      processed_lines.append(line)
+              
+              # 处理末尾的引用块
+              if quote_content:
+                  processed_lines.append('```quote')
+                  processed_lines.extend(quote_content)
+                  processed_lines.append('```')
+                  processed_lines.append('')
+              
+              return '\n'.join(processed_lines)
           
           def process_markdown_file(filepath):
               print(f"处理文件: {filepath}")
@@ -170,10 +216,13 @@ jobs:
                   # 1. 保护代码块
                   protected_content, code_blocks, inline_code_blocks = protect_code_blocks(content)
                   
-                  # 2. 处理非表格内的图片，确保正确位置
-                  processed_content = process_images_in_content(protected_content)
+                  # 2. 处理引用块
+                  processed_content = process_quote_blocks(protected_content)
                   
-                  # 3. 处理链接标签（不处理代码块中的）
+                  # 3. 处理非表格内的图片，确保正确位置
+                  processed_content = process_images_in_content(processed_content)
+                  
+                  # 4. 处理链接标签（不处理代码块中的）
                   link_pattern = re.compile(r'<a\s+([^>]+)>(.*?)</a>', re.IGNORECASE | re.DOTALL)
                   
                   def replace_link_tag(match):
@@ -188,12 +237,14 @@ jobs:
                   
                   processed_content = link_pattern.sub(replace_link_tag, processed_content)
                   
-                  # 4. 移除其他HTML标签（不处理代码块中的）
-                  # 小心处理，避免移除代码中的<>
+                  # 5. 移除其他HTML标签（不处理代码块中的）
                   processed_content = re.sub(r'<(?!@@@CODE_BLOCK_|@@@INLINE_CODE_)(?!\/?code>)(?!\/?pre>)(?!\/?span>)(?!\/?div>)(?!\/?p>)(?!\/?br>)[^>]+>', '', processed_content)
                   
-                  # 5. 恢复代码块
+                  # 6. 恢复代码块
                   final_content = restore_code_blocks(processed_content, code_blocks, inline_code_blocks)
+                  
+                  # 7. 确保代码块格式正确
+                  final_content = re.sub(r'^include\s+<', r'#include <', final_content, flags=re.MULTILINE)
                   
                   # 保存处理后的文件
                   with open(filepath, 'w', encoding='utf-8') as f:
@@ -248,12 +299,82 @@ jobs:
           \usepackage{xcolor}
           \usepackage{graphicx}
           \usepackage{float}
-          \usepackage{placeins} % 用于控制浮动体位置
+          \usepackage{placeins}
+          \usepackage{tcolorbox}
+          \usepackage{mdframed}
           
           \definecolor{codebg}{rgb}{0.98,0.98,0.98}
           \definecolor{framecolor}{rgb}{0.8,0.8,0.8}
+          \definecolor{quotebg}{rgb}{0.95,0.95,0.98}
+          \definecolor{quoteframe}{rgb}{0.7,0.7,0.9}
           
+          % 设置引用块样式
+          \newmdenv[
+            backgroundcolor=quotebg,
+            linecolor=quoteframe,
+            linewidth=1pt,
+            skipabove=12pt,
+            skipbelow=12pt,
+            leftmargin=12pt,
+            rightmargin=12pt,
+            innerleftmargin=12pt,
+            innerrightmargin=12pt,
+            innertopmargin=8pt,
+            innerbottommargin=8pt,
+            frametitle={注意：},
+            frametitlebackgroundcolor=quotebg,
+            frametitlefont=\bfseries\color{blue}
+          ]{quoteblock}
+          
+          % 设置代码块样式
           \lstset{
+            basicstyle=\ttfamily\footnotesize,
+            backgroundcolor=\color{codebg},
+            frame=single,
+            framesep=6pt,
+            framerule=0.8pt,
+            rulecolor=\color{framecolor},
+            breaklines=true,
+            breakatwhitespace=true,
+            breakautoindent=true,
+            breakindent=20pt,
+            prebreak=\raisebox{0ex}[0ex][0ex]{\ensuremath{\hookleftarrow}},
+            postbreak=\raisebox{0ex}[0ex][0ex]{\ensuremath{\hookrightarrow}},
+            showstringspaces=false,
+            tabsize=2,
+            numbers=none,
+            xleftmargin=12pt,
+            xrightmargin=12pt,
+            upquote=true,
+            columns=fullflexible,
+            keepspaces=true,
+            escapeinside={(*@}{@*)},
+          }
+          
+          % 为特定语言设置不同的样式
+          \lstdefinestyle{cppstyle}{
+            basicstyle=\ttfamily\footnotesize,
+            backgroundcolor=\color{codebg},
+            frame=single,
+            framesep=6pt,
+            framerule=0.8pt,
+            rulecolor=\color{framecolor},
+            breaklines=true,
+            breakatwhitespace=true,
+            breakindent=20pt,
+            prebreak=\raisebox{0ex}[0ex][0ex]{\ensuremath{\hookleftarrow}},
+            postbreak=\raisebox{0ex}[0ex][0ex]{\ensuremath{\hookrightarrow}},
+            showstringspaces=false,
+            tabsize=2,
+            numbers=none,
+            xleftmargin=12pt,
+            xrightmargin=12pt,
+            upquote=true,
+            columns=fullflexible,
+            keepspaces=true,
+          }
+          
+          \lstdefinestyle{textstyle}{
             basicstyle=\ttfamily\small,
             backgroundcolor=\color{codebg},
             frame=single,
@@ -264,7 +385,7 @@ jobs:
             breakatwhitespace=true,
             breakautoindent=true,
             breakindent=0pt,
-            postbreak=\raisebox{0ex}[0ex][0ex]{\ensuremath{\color{red}\hookrightarrow\space}},
+            postbreak=\mbox{\textcolor{red}{$\hookrightarrow$}\space},
             showstringspaces=false,
             tabsize=2,
             numbers=none,
@@ -273,12 +394,15 @@ jobs:
             upquote=true,
             columns=fullflexible,
             keepspaces=true,
-            escapeinside={(*@}{@*)}, % 允许在代码块中插入LaTeX命令
           }
           
           % 设置图片浮动参数，确保图片在正确位置
           \usepackage{float}
-          \floatplacement{figure}{H} % 强制图片在当前位置
+          \floatplacement{figure}{H}
+          
+          % 移除图片标题
+          \usepackage{caption}
+          \captionsetup[figure]{labelformat=empty}
           
           \usepackage{parskip}
           \setlength{\parindent}{0pt}
@@ -349,21 +473,17 @@ jobs:
           \usepackage{titletoc}
           \setcounter{tocdepth}{-1}
           
-          % 处理Markdown中的图片宽度标记
-          \makeatletter
-          \def\processwidth#1{%
-            \in@{width=}{#1}%
-            \ifin@
-              \expandafter\getwidth\expandafter{\#1}%
-            \else
-              #1%
-            \fi
+          % 处理quote环境
+          \renewenvironment{quote}{\begin{quoteblock}}{\end{quoteblock}}
+          
+          % 处理代码块语言映射
+          \lstdefinelanguage{quote}{
+            morekeywords={},
+            sensitive=false,
+            morecomment=[l]{//},
+            morecomment=[s]{/*}{*/},
+            morestring=[b]",
           }
-          \def\getwidth#1width=#2#3\relax{%
-            \def\imgwidth{#2}%
-            \includegraphics[width=\imgwidth]{#1#3}%
-          }
-          \makeatother
           EOF
       
       - name: "Set up output directory"
@@ -401,20 +521,12 @@ jobs:
             
             echo "资源路径: $resource_paths"
             
-            # 检查markdown文件中提到的图片
-            echo "检查图片引用..."
-            if [ -f "$md_file" ]; then
-              grep -n '!\[.*\](.*)' "$md_file" | head -10 | while read img_line; do
-                echo "  找到图片引用: $img_line"
-              done || true
-            fi
-            
             set +e
             
             # 转换PDF - 使用增强设置
             echo "开始转换PDF..."
             
-            # 构建Pandoc命令，修复参数错误
+            # 构建Pandoc命令
             pandoc "$md_file" \
               --resource-path="$resource_paths" \
               -o "pdf_output/$dir_name/$base_name.pdf" \
@@ -433,6 +545,7 @@ jobs:
               --highlight-style=tango \
               -f markdown \
               -M date="$CURRENT_DATE" \
+              --shift-heading-level-by=0 \
               2>&1 | tee conversion.log
               
             conversion_status=$?
@@ -471,11 +584,11 @@ jobs:
             exit 1
           fi
       
-      - name: "Copy resource directories to output"
+      - name: "Copy resource directories to output (only resource)"
         run: |
           echo "复制resource目录到输出目录..."
           
-          # 查找所有有PDF文件的目录，复制对应的resource目录
+          # 查找所有有PDF文件的目录，只复制对应的resource目录，不复制picture目录
           find pdf_output -name "*.pdf" -type f | while read pdf_file; do
             pdf_dir=$(dirname "$pdf_file")
             rel_dir=${pdf_dir#pdf_output/}
@@ -486,11 +599,7 @@ jobs:
               cp -r "$rel_dir/resource" "$pdf_dir/" 2>/dev/null || echo "无法复制 $rel_dir/resource"
             fi
             
-            # 如果原始目录下有picture目录，则复制到输出目录
-            if [ -d "$rel_dir/picture" ]; then
-              echo "复制 $rel_dir/picture 到 $pdf_dir/"
-              cp -r "$rel_dir/picture" "$pdf_dir/" 2>/dev/null || echo "无法复制 $rel_dir/picture"
-            fi
+            # 注意：不复制picture目录
           done
       
       - name: "Verify PDF files"
@@ -525,10 +634,14 @@ jobs:
           echo "已优化功能：" >> pdf_output/README.md
           echo "1. 保护代码块内容，避免<>被移除" >> pdf_output/README.md
           echo "2. 图片位置固定，避免浮动错位" >> pdf_output/README.md
-          echo "3. 表格内图片保持原样显示" >> pdf_output/README.md
-          echo "4. 代码块自动换行，带边框" >> pdf_output/README.md
-          echo "5. 添加平铺式 'emakefun' 水印" >> pdf_output/README.md
-          echo "6. 不生成目录" >> pdf_output/README.md
+          echo "3. 完全移除图片下方标签文本" >> pdf_output/README.md
+          echo "4. 移除图片宽度标记{width=...}" >> pdf_output/README.md
+          echo "5. 优化代码块换行，防止超出边界" >> pdf_output/README.md
+          echo "6. 添加引用块背景框" >> pdf_output/README.md
+          echo "7. 区分代码块和文本框换行" >> pdf_output/README.md
+          echo "8. 只输出resource文件夹，不输出picture文件夹" >> pdf_output/README.md
+          echo "9. 添加平铺式 'emakefun' 水印" >> pdf_output/README.md
+          echo "10. 不生成目录" >> pdf_output/README.md
           echo "" >> pdf_output/README.md
           
           echo "## 文件列表" >> pdf_output/README.md
@@ -566,9 +679,10 @@ jobs:
           
           # 统计有resource目录的PDF数量
           resource_dirs_count=$(find pdf_output -type d -name "resource" 2>/dev/null | wc -l)
-          picture_dirs_count=$(find pdf_output -type d -name "picture" 2>/dev/null | wc -l)
           
-          echo "总计: $PDF_COUNT 个 PDF 文件, 总大小约 ${total_size_mb}MB, ${resource_dirs_count} 个目录包含resource资源, ${picture_dirs_count} 个目录包含picture资源" >> pdf_output/README.md
+          echo "总计: $PDF_COUNT 个 PDF 文件, 总大小约 ${total_size_mb}MB, ${resource_dirs_count} 个目录包含resource资源" >> pdf_output/README.md
+          echo "" >> pdf_output/README.md
+          echo "**注意:** 本次转换已优化，不包含picture文件夹，只保留resource文件夹。" >> pdf_output/README.md
       
       - name: "Create zip archive for release"
         if: startsWith(github.ref, 'refs/tags/')
