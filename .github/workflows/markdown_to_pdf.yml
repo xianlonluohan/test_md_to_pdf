@@ -50,23 +50,6 @@ jobs:
           import os
           import re
           import sys
-          from urllib.parse import urlparse
-          
-          def clean_url(url):
-              """清理URL，修复破折号和空格问题"""
-              if not url:
-                  return url
-              
-              # 修复常见的URL问题
-              url = url.replace('gh- proxy.com', 'gh-proxy.com')
-              url = url.replace('emakefun- arduino- library', 'emakefun-arduino-library')
-              url = url.replace(' - ', '-')
-              url = url.replace(' ', '')
-              
-              # 修复括号问题
-              url = url.replace(')_', ')')
-              
-              return url
           
           def convert_html_to_markdown(content, file_path):
               """将HTML标签转换为Markdown格式"""
@@ -104,59 +87,34 @@ jobs:
               
               content = img_pattern.sub(replace_img_tag, content)
               
-              # 处理链接标签 - 更加精确地处理
-              link_pattern = re.compile(r'<a\s+([^>]+)>([^<]+)</a>', re.IGNORECASE)
+              # 处理链接标签 - 修复URL编码问题
+              content = re.sub(r'%5B链接%5D\(', '[链接](', content)
+              content = re.sub(r'%5D\(', '](', content)
               
-              def replace_link_tag(match):
-                  attrs_str = match.group(1)
-                  link_text = match.group(2).strip()
-                  
-                  href_match = re.search(r'href\s*=\s*["\']([^"\']+)["\']', attrs_str)
-                  if href_match:
-                      href = href_match.group(1)
-                      # 清理URL
-                      href = clean_url(href)
-                      # 返回Markdown链接格式，确保文本和URL正确
-                      return f'[{link_text}]({href})'
-                  return link_text
+              # 处理裸URL链接
+              url_pattern = re.compile(r'(https?://[^\s<>"\'()]+)')
               
-              content = link_pattern.sub(replace_link_tag, content)
+              def replace_url(match):
+                  url = match.group(0)
+                  return f'[链接]({url})'
+              
+              content = url_pattern.sub(replace_url, content)
               
               # 处理center标签 - 移除即可
               content = re.sub(r'<center>(.*?)</center>', r'\1', content, flags=re.DOTALL | re.IGNORECASE)
               
               # 修复头文件包含问题 - 保护尖括号
-              # 只处理不在代码块中的#include
-              lines = content.split('\n')
-              in_code_block = False
-              processed_lines = []
-              
-              for line in lines:
-                  if line.strip().startswith('```') or line.strip().startswith('~~~'):
-                      in_code_block = not in_code_block
-                      processed_lines.append(line)
-                  elif not in_code_block:
-                      # 修复头文件包含
-                      line = re.sub(r'#include\s+([^<\s][^\s]*)', r'#include <\1>', line)
-                      processed_lines.append(line)
-                  else:
-                      processed_lines.append(line)
-              
-              content = '\n'.join(processed_lines)
+              content = re.sub(r'#include\s+([^<>\s][^\s]*)(?!\s*>)', r'#include <\1>', content)
               
               # 处理LaTeX数学公式
               content = re.sub(r'\\\(', r'$', content)
               content = re.sub(r'\\\)', r'$', content)
               
               # 移除其他HTML标签，但保护尖括号内容
-              content = re.sub(r'<(?!\/?(?:img|a|center|br|p|div|span|table|tr|td|th|ul|ol|li|strong|em|b|i|u|h[1-6])\b)[^>]+>', '', content, flags=re.IGNORECASE)
+              content = re.sub(r'<(?!\/?(?:img|a|center|br|p|div|span|table|tr|td|th|ul|ol|li|strong|em|b|i|u|h[1-6]|code|pre)\b)[^>]+>', '', content, flags=re.IGNORECASE)
               
-              # 修复损坏的链接格式
-              # 修复类似 "1%5B链接%5D(https://..." 的格式
-              content = re.sub(r'(\d+)%5B(.*?)%5D\((https?://[^)]+)\)', r'[\2](\3)', content)
-              
-              # 修复括号问题
-              content = re.sub(r'\)_(https?://)', r')(\1', content)
+              # 修复链接格式问题
+              content = re.sub(r'\[链接\]\((https?://[^)]+)\)', r'[链接](\1)', content)
               
               # 恢复代码块
               for i, code_block in enumerate(code_blocks):
@@ -234,6 +192,7 @@ jobs:
           \definecolor{codebg}{rgb}{0.98,0.98,0.98}
           \definecolor{framecolor}{rgb}{0.8,0.8,0.8}
           
+          % 移除尖括号颜色设置，保持黑色
           \lstset{
             basicstyle=\ttfamily\normalsize,
             backgroundcolor=\color{codebg},
@@ -254,8 +213,7 @@ jobs:
             upquote=true,
             columns=fullflexible,
             keepspaces=true,
-            % 移除尖括号的特殊处理，让它们正常显示为黑色
-            % literate=*{<}{<}1{>}{>}1, % 简化尖括号处理
+            % 移除尖括号的颜色设置，保持默认黑色
           }
           
           \usepackage{parskip}
@@ -409,12 +367,17 @@ jobs:
             # 创建临时文件，修复链接格式
             tmp_md_file="$(mktemp)"
             if [ -f "$md_file" ]; then
-              # 读取并修复链接格式
-              cat "$md_file" | \
-                sed -E 's|(\d+)%5B([^%]+)%5D\((https?://[^)]+)\)|[\2](\3)|g' | \
-                sed -E 's|\)_(https?://|)(\1|g' | \
-                sed -E 's|gh- proxy\.com|gh-proxy.com|g' | \
-                sed -E 's|emakefun- arduino- library|emakefun-arduino-library|g' > "$tmp_md_file"
+              # 修复链接格式：确保链接格式正确
+              cat "$md_file" | sed -E '
+                # 修复URL编码问题
+                s/%5B链接%5D\(/\[链接\]\(/g
+                s/%5D\(/\]\(/g
+                # 修复断开的链接
+                s/https:\/\/emakefun-arduino-library\.github\.io\/em\)_/https:\/\/emakefun-arduino-library\.github\.io\/em_/g
+                s/\.\)2\.zip/)\.zip/g
+                # 修复链接格式
+                s|(https?://[^\s<>"'\''()]+)|[链接](\1)|g
+              ' > "$tmp_md_file"
             fi
             
             # 使用Pandoc转换
@@ -435,6 +398,7 @@ jobs:
               --wrap=auto \
               --highlight-style=tango \
               --variable=classoption:oneside \
+              --variable=links-as-notes=true \
               --variable=tables \
               -f markdown \
               -t latex+raw_tex \
@@ -531,10 +495,9 @@ jobs:
           echo "优化图片位置控制，确保图片在正确位置" >> pdf_output/README.md
           echo "支持表格内图片正常显示" >> pdf_output/README.md
           echo "图片下方不显示任何标题标签（完全去掉'图x：'）" >> pdf_output/README.md
-          echo "修复代码块中头文件包含尖括号丢失问题" >> pdf_output/README.md
-          echo "修复链接转换问题" >> pdf_output/README.md
+          echo "代码块中尖括号保持黑色显示" >> pdf_output/README.md
+          echo "修复链接转换问题，正确显示链接" >> pdf_output/README.md
           echo "修复代码块异常问题" >> pdf_output/README.md
-          echo "代码块中尖括号显示为黑色（非红色）" >> pdf_output/README.md
           echo "" >> pdf_output/README.md
           
           echo "## 文件列表" >> pdf_output/README.md
