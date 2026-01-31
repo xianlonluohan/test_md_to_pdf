@@ -1,4 +1,4 @@
-name: "Markdown to PDF Converter with Tiled Watermark"
+name: "Markdown to PDF Converter with Tiled Watermark - Optimized"
 
 on:
   push:
@@ -44,17 +44,84 @@ jobs:
           
           pip3 install beautifulsoup4
       
-      - name: "Create HTML to Markdown converter"
+      - name: "Create optimized HTML to Markdown converter"
         run: |
           cat > convert_html.py << 'EOF'
           import os
           import re
           import sys
           
-          def convert_html_to_markdown(content, file_path):
-              """将HTML标签转换为Markdown格式"""
+          def protect_code_blocks(content):
+              """保护代码块，避免内部的特殊字符被处理"""
+              code_blocks = []
               
-              # 处理图片标签
+              # 匹配三个反引号包围的代码块
+              code_pattern = re.compile(r'```[\s\S]*?```', re.MULTILINE)
+              
+              def replace_code_block(match):
+                  code = match.group(0)
+                  placeholder = f'@@CODE_BLOCK_{len(code_blocks)}@@'
+                  code_blocks.append(code)
+                  return placeholder
+              
+              # 替换所有代码块为占位符
+              content = code_pattern.sub(replace_code_block, content)
+              
+              # 匹配行内代码（单个反引号）
+              inline_code_pattern = re.compile(r'`[^`\n]+`')
+              
+              def replace_inline_code(match):
+                  code = match.group(0)
+                  placeholder = f'@@INLINE_CODE_{len(code_blocks)}@@'
+                  code_blocks.append(code)
+                  return placeholder
+              
+              content = inline_code_pattern.sub(replace_inline_code, content)
+              
+              return content, code_blocks
+          
+          def restore_code_blocks(content, code_blocks):
+              """恢复被保护的代码块"""
+              for i, code in enumerate(code_blocks):
+                  if i < len(code_blocks):
+                      placeholder = f'@@CODE_BLOCK_{i}@@' if '```' in code else f'@@INLINE_CODE_{i}@@'
+                      content = content.replace(placeholder, code, 1)
+              return content
+          
+          def protect_tables(content):
+              """保护表格结构"""
+              tables = []
+              
+              # 匹配Markdown表格
+              # 表格以管道符开始，包含对齐符号（:---）
+              table_pattern = re.compile(r'(\|.*\|[\r\n]+)((?:\|.*:.*\|[\r\n]+)?)((?:\|.*\|[\r\n]+)+)')
+              
+              def replace_table(match):
+                  table = match.group(0)
+                  placeholder = f'@@TABLE_{len(tables)}@@'
+                  tables.append(table)
+                  return placeholder
+              
+              content = table_pattern.sub(replace_table, content)
+              return content, tables
+          
+          def restore_tables(content, tables):
+              """恢复被保护的表格"""
+              for i, table in enumerate(tables):
+                  placeholder = f'@@TABLE_{i}@@'
+                  content = content.replace(placeholder, table, 1)
+              return content
+          
+          def convert_html_to_markdown(content, file_path):
+              """将HTML标签转换为Markdown格式，同时保护代码块和表格"""
+              
+              # 1. 先保护代码块
+              content, code_blocks = protect_code_blocks(content)
+              
+              # 2. 保护表格
+              content, tables = protect_tables(content)
+              
+              # 3. 处理图片标签
               img_pattern = re.compile(r'<img\s+([^>]+)>', re.IGNORECASE)
               
               def replace_img_tag(match):
@@ -77,7 +144,7 @@ jobs:
               
               content = img_pattern.sub(replace_img_tag, content)
               
-              # 处理链接标签
+              # 4. 处理链接标签
               link_pattern = re.compile(r'<a\s+([^>]+)>(.*?)</a>', re.IGNORECASE | re.DOTALL)
               
               def replace_link_tag(match):
@@ -92,11 +159,21 @@ jobs:
               
               content = link_pattern.sub(replace_link_tag, content)
               
-              # 处理center标签 - 移除即可
-              content = re.sub(r'<center>(.*?)</center>', r'\1', content, flags=re.DOTALL | re.IGNORECASE)
+              # 5. 处理center标签 - 转换为简单的换行，或保留为空
+              content = re.sub(r'<center>', '', content, flags=re.IGNORECASE)
+              content = re.sub(r'</center>', '', content, flags=re.IGNORECASE)
               
-              # 移除所有其他HTML标签，保留内容
-              content = re.sub(r'<[^>]+>', '', content)
+              # 6. 处理其他HTML标签，但保护代码块中的内容
+              simple_tags = ['b', 'i', 'u', 'strong', 'em']
+              for tag in simple_tags:
+                  content = re.sub(f'<{tag}>', '', content, flags=re.IGNORECASE)
+                  content = re.sub(f'</{tag}>', '', content, flags=re.IGNORECASE)
+              
+              # 7. 恢复表格
+              content = restore_tables(content, tables)
+              
+              # 8. 恢复代码块
+              content = restore_code_blocks(content, code_blocks)
               
               return content
           
@@ -253,7 +330,7 @@ jobs:
         run: |
           mkdir -p pdf_output
       
-      - name: "Convert Markdown to PDF"
+      - name: "Convert Markdown to PDF (Optimized)"
         run: |
           MD_FILES=$(find . -name "*.md" -not -path "./.*" -not -path "*/node_modules/*" -not -path "./pdf_output/*" | sed 's/^\.\///')
           
@@ -278,8 +355,6 @@ jobs:
             md_dir=$(dirname "$md_file")
             
             # 构建资源路径 - 包含多个可能的位置
-            # 注意：我们首先尝试markdown文件所在目录，然后是其下的picture目录
-            # 然后是项目根目录的picture和resource目录
             resource_paths="$md_dir:$md_dir/picture:$md_dir/../picture:.:./picture:./resource"
             
             echo "资源路径: $resource_paths"
@@ -294,10 +369,10 @@ jobs:
             
             set +e
             
-            # 转换PDF - 使用简单的设置，不压缩
+            # 转换PDF - 使用优化的设置
             echo "开始转换PDF..."
             
-            # 先尝试直接转换
+            # 使用优化的pandoc参数
             pandoc "$md_file" \
               --resource-path="$resource_paths" \
               -o "pdf_output/$dir_name/$base_name.pdf" \
@@ -312,7 +387,9 @@ jobs:
               -V colorlinks=true \
               -V linkcolor=blue \
               -V urlcolor=blue \
-              --wrap=auto \
+              --wrap=none \  # 改为none，避免自动换行破坏代码块
+              --columns=80 \  # 设置列宽
+              --markdown-headings=atx \  # 保持ATX风格标题
               --highlight-style=tango \
               -f markdown \
               2>&1 | tee conversion.log
@@ -399,7 +476,8 @@ jobs:
           echo "" >> pdf_output/README.md
           echo "生成时间: $(date '+%Y-%m-%d %H:%M:%S')" >> pdf_output/README.md
           echo "已优化HTML标签处理，支持图片和链接" >> pdf_output/README.md
-          echo "代码块带边框，自动换行" >> pdf_output/README.md
+          echo "代码块保护机制，避免尖括号丢失" >> pdf_output/README.md
+          echo "表格保护机制，确保表格内图片正常显示" >> pdf_output/README.md
           echo "添加平铺式 'emakefun' 水印" >> pdf_output/README.md
           echo "包含resource目录中的程序文件" >> pdf_output/README.md
           echo "" >> pdf_output/README.md
