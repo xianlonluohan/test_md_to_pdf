@@ -87,17 +87,18 @@ jobs:
               
               content = img_pattern.sub(replace_img_tag, content)
               
-              # 处理链接标签
-              link_pattern = re.compile(r'<a\s+([^>]+)>(.*?)</a>', re.IGNORECASE | re.DOTALL)
+              # 处理链接标签 - 更精确的匹配
+              link_pattern = re.compile(r'<a\s+([^>]+)>([^<]+)</a>', re.IGNORECASE)
               
               def replace_link_tag(match):
                   attrs_str = match.group(1)
                   link_text = match.group(2).strip()
                   
-                  href_match = re.search(r'href\s*=\s*["\']([^"\']+)["\']', attrs_str)
+                  # 提取href
+                  href_match = re.search(r'href\s*=\s*["\']([^"\']+)["\']', attrs_str, re.IGNORECASE)
                   if href_match:
                       href = href_match.group(1)
-                      # 确保链接格式正确，避免在PDF中暴露URL
+                      # 直接返回Markdown链接格式，不使用编码
                       return f'[{link_text}]({href})'
                   return link_text
               
@@ -107,7 +108,8 @@ jobs:
               content = re.sub(r'<center>(.*?)</center>', r'\1', content, flags=re.DOTALL | re.IGNORECASE)
               
               # 修复头文件包含问题 - 保护尖括号
-              content = re.sub(r'#include\s+([^<\s][^\s]*)', r'#include <\1>', content)
+              # 注意：这里只处理不在代码块中的内容
+              content = re.sub(r'(?<!@@@CODE_BLOCK_\d+@@@.*)#include\s+([^<\s][^\s]*)', r'#include <\1>', content)
               
               # 处理LaTeX数学公式
               content = re.sub(r'\\\(', r'$', content)
@@ -115,6 +117,18 @@ jobs:
               
               # 移除其他HTML标签，但保护尖括号内容
               content = re.sub(r'<(?!\/?(?:img|a|center|br|p|div|span|table|tr|td|th|ul|ol|li|strong|em|b|i|u|h[1-6])\b)[^>]+>', '', content, flags=re.IGNORECASE)
+              
+              # 修复裸URL链接 - 确保URL被正确包裹
+              url_pattern = re.compile(r'(?<!\()https?://[^\s<>"\'{}|\\^`\[\]]+')
+              def replace_url(match):
+                  url = match.group(0)
+                  # 如果URL已经用括号包裹了，就不处理
+                  if re.search(r'\[.*\]\(.*\)', content):
+                      return url
+                  return f'[链接]({url})'
+              
+              # 只在非代码块区域处理URL
+              content = re.sub(r'(?<!@@@CODE_BLOCK_\d+@@@.*)https?://[^\s<>"\'{}|\\^`\[\]]+', replace_url, content)
               
               # 恢复代码块
               for i, code_block in enumerate(code_blocks):
@@ -212,8 +226,7 @@ jobs:
             upquote=true,
             columns=fullflexible,
             keepspaces=true,
-            literate=*{<}{{{\color{red}<}}}1{>}{{{\color{red}>}}}1, % 保持尖括号
-            escapechar=|, % 设置转义字符
+            % 移除尖括号的特殊着色，保持黑色
           }
           
           \usepackage{parskip}
@@ -328,6 +341,31 @@ jobs:
         run: |
           mkdir -p pdf_output
       
+      - name: "Pre-process Markdown files"
+        run: |
+          MD_FILES=$(find . -name "*.md" -not -path "./.*" -not -path "*/node_modules/*" -not -path "./pdf_output/*" | sed 's/^\.\///')
+          
+          for md_file in $MD_FILES; do
+            [ -z "$md_file" ] && continue
+            
+            echo "预处理文件: $md_file"
+            
+            # 创建临时文件进行预处理
+            if [ -f "$md_file" ]; then
+              # 修复链接格式：确保裸URL被正确转换为Markdown链接
+              # 同时避免对已存在的Markdown链接进行重复处理
+              tmp_file="$(mktemp)"
+              cat "$md_file" | \
+                sed -E 's|\[(链接|点击此处)\]\(([^)]+)\)|[\1](\2)|g' | \
+                sed -E 's|(^|[^[])(https?://[^[:space:]]+)|[\1\2](\2)|g' | \
+                sed -E 's|\[\[(https?://[^]]+)\]\]\(https?://[^)]+\)|[\1](\1)|g' > "$tmp_file"
+              
+              # 复制回原文件
+              cp "$tmp_file" "$md_file"
+              rm -f "$tmp_file"
+            fi
+          done
+      
       - name: "Convert Markdown to PDF"
         run: |
           MD_FILES=$(find . -name "*.md" -not -path "./.*" -not -path "*/node_modules/*" -not -path "./pdf_output/*" | sed 's/^\.\///')
@@ -364,15 +402,8 @@ jobs:
             # 转换PDF - 使用简单的设置，不压缩
             echo "开始转换PDF..."
             
-            # 创建临时文件，修复链接格式
-            tmp_md_file="$(mktemp)"
-            if [ -f "$md_file" ]; then
-              # 修复链接格式：确保链接格式正确
-              cat "$md_file" | sed -E 's|https://([a-zA-Z0-9./-]+)|[链接](https://\1)|g' > "$tmp_md_file"
-            fi
-            
-            # 使用Pandoc转换
-            pandoc "$tmp_md_file" \
+            # 直接转换，不再使用临时文件
+            pandoc "$md_file" \
               --resource-path="$resource_paths" \
               -o "pdf_output/$dir_name/$base_name.pdf" \
               --pdf-engine=xelatex \
@@ -396,9 +427,6 @@ jobs:
               2>&1 | tee conversion.log
               
             conversion_status=$?
-            
-            # 清理临时文件
-            rm -f "$tmp_md_file"
             
             set -e
             
@@ -486,9 +514,9 @@ jobs:
           echo "优化图片位置控制，确保图片在正确位置" >> pdf_output/README.md
           echo "支持表格内图片正常显示" >> pdf_output/README.md
           echo "图片下方不显示任何标题标签（完全去掉'图x：'）" >> pdf_output/README.md
-          echo "修复代码块中头文件包含尖括号丢失问题" >> pdf_output/README.md
+          echo "修复代码块中头文件包含尖括号问题" >> pdf_output/README.md
           echo "修复链接转换问题" >> pdf_output/README.md
-          echo "修复代码块异常问题" >> pdf_output/README.md
+          echo "代码块中尖括号保持黑色正常显示" >> pdf_output/README.md
           echo "" >> pdf_output/README.md
           
           echo "## 文件列表" >> pdf_output/README.md
