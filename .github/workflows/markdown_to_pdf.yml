@@ -255,27 +255,26 @@ jobs:
           \newcolumntype{C}{>{\centering\arraybackslash}p{0.3\textwidth}}
           \newcolumntype{R}{>{\raggedleft\arraybackslash}p{0.2\textwidth}}
           
-          % 完全禁用图片标题和标签
+          % 完全禁用图片标题和标签 - 使用更简单的方法
           \usepackage{caption}
-          \captionsetup[figure]{labelformat=empty, labelsep=none, textformat=empty}
-          \captionsetup[table]{labelformat=empty, labelsep=none, textformat=empty}
+          \DeclareCaptionLabelFormat{empty}{}
+          \captionsetup[figure]{labelformat=empty, labelsep=none, justification=centering}
+          \captionsetup[table]{labelformat=empty, labelsep=none}
           
-          % 重写caption命令，彻底移除标题
+          % 重写caption命令，彻底移除标题 - 修复参数编号问题
           \makeatletter
-          \long\def\@caption##1[##2]##3{%
+          \def\@caption#1[#2]#3{%
             \par
-            \ifx\@captype\@undefined
-            \else
-              % 完全跳过标题生成
-            \fi}
+            % 完全跳过标题生成
+          }
           
-          \long\def\@makecaption##1##2{%
+          \def\@makecaption#1#2{%
             % 完全不做任何事情
           }
           \makeatother
           
           % 完全禁用subcaption
-          \captionsetup[subfigure]{labelformat=empty, labelsep=none, textformat=empty}
+          \captionsetup[subfigure]{labelformat=empty, labelsep=none}
           
           \newcommand\BackgroundPicture{%
             \begin{tikzpicture}[remember picture,overlay]
