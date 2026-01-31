@@ -54,6 +54,16 @@ jobs:
           def convert_html_to_markdown(content, file_path):
               """将HTML标签转换为Markdown格式"""
               
+              # 首先保护代码块，防止处理代码块内的内容
+              code_blocks = []
+              def store_code_block(match):
+                  code_blocks.append(match.group(0))
+                  return f'@@@CODE_BLOCK_{len(code_blocks)-1}@@@'
+              
+              # 保护代码块
+              content = re.sub(r'```[\s\S]*?```', store_code_block, content)
+              content = re.sub(r'~~~[\s\S]*?~~~', store_code_block, content)
+              
               # 处理图片标签
               img_pattern = re.compile(r'<img\s+([^>]+)>', re.IGNORECASE)
               
@@ -87,6 +97,7 @@ jobs:
                   href_match = re.search(r'href\s*=\s*["\']([^"\']+)["\']', attrs_str)
                   if href_match:
                       href = href_match.group(1)
+                      # 确保链接格式正确，避免在PDF中暴露URL
                       return f'[{link_text}]({href})'
                   return link_text
               
@@ -95,8 +106,20 @@ jobs:
               # 处理center标签 - 移除即可
               content = re.sub(r'<center>(.*?)</center>', r'\1', content, flags=re.DOTALL | re.IGNORECASE)
               
-              # 移除所有其他HTML标签，保留内容
-              content = re.sub(r'<[^>]+>', '', content)
+              # 修复头文件包含问题 - 保护尖括号
+              content = re.sub(r'#include\s+([^<\s][^\s]*)', r'#include <\1>', content)
+              
+              # 处理LaTeX数学公式
+              content = re.sub(r'\\\(', r'$', content)
+              content = re.sub(r'\\\)', r'$', content)
+              
+              # 移除其他HTML标签，但保护尖括号内容
+              content = re.sub(r'<(?!\/?(?:img|a|center|br|p|div|span|table|tr|td|th|ul|ol|li|strong|em|b|i|u|h[1-6])\b)[^>]+>', '', content, flags=re.IGNORECASE)
+              
+              # 恢复代码块
+              for i, code_block in enumerate(code_blocks):
+                  placeholder = f'@@@CODE_BLOCK_{i}@@@'
+                  content = content.replace(placeholder, code_block)
               
               return content
           
@@ -163,6 +186,8 @@ jobs:
           \usepackage{placeins}
           \usepackage{booktabs}
           \usepackage{array}
+          \usepackage{caption} % 添加caption包用于控制图片标题
+          \usepackage{etoolbox} % 用于更灵活的控制
           
           \definecolor{codebg}{rgb}{0.98,0.98,0.98}
           \definecolor{framecolor}{rgb}{0.8,0.8,0.8}
@@ -187,6 +212,8 @@ jobs:
             upquote=true,
             columns=fullflexible,
             keepspaces=true,
+            literate=*{<}{{{\color{red}<}}}1{>}{{{\color{red}>}}}1, % 保持尖括号
+            escapechar=|, % 设置转义字符
           }
           
           \usepackage{parskip}
@@ -220,6 +247,23 @@ jobs:
           \setcounter{bottomnumber}{9}
           \setcounter{totalnumber}{20}
           \setcounter{dbltopnumber}{9}
+          
+          % 完全去掉图片标题 - 不显示"图x："等任何标签
+          \usepackage{caption}
+          \captionsetup[figure]{
+            labelformat=empty,  % 不显示标签
+            textformat=empty,   % 不显示标题文本
+            justification=centering,
+            singlelinecheck=true,
+            labelsep=none,
+            skip=0pt  % 去掉标题占用的空间
+          }
+          
+          % 在图片环境后添加额外处理，确保没有标题显示
+          \usepackage{etoolbox}
+          \AtBeginEnvironment{figure}{%
+            \captionsetup{labelformat=empty,textformat=empty}%
+          }
           
           % 表格设置 - 确保表格正常显示
           \usepackage{booktabs}
@@ -315,21 +359,20 @@ jobs:
             
             echo "资源路径: $resource_paths"
             
-            # 检查markdown文件中提到的图片
-            echo "检查图片引用..."
-            if [ -f "$md_file" ]; then
-              grep -o '!\[.*\](.*)' "$md_file" | head -5 | while read img; do
-                echo "  找到图片引用: $img"
-              done || true
-            fi
-            
             set +e
             
             # 转换PDF - 使用简单的设置，不压缩
             echo "开始转换PDF..."
             
-            # 先尝试直接转换
-            pandoc "$md_file" \
+            # 创建临时文件，修复链接格式
+            tmp_md_file="$(mktemp)"
+            if [ -f "$md_file" ]; then
+              # 修复链接格式：确保链接格式正确
+              cat "$md_file" | sed -E 's|https://([a-zA-Z0-9./-]+)|[链接](https://\1)|g' > "$tmp_md_file"
+            fi
+            
+            # 使用Pandoc转换
+            pandoc "$tmp_md_file" \
               --resource-path="$resource_paths" \
               -o "pdf_output/$dir_name/$base_name.pdf" \
               --pdf-engine=xelatex \
@@ -353,6 +396,9 @@ jobs:
               2>&1 | tee conversion.log
               
             conversion_status=$?
+            
+            # 清理临时文件
+            rm -f "$tmp_md_file"
             
             set -e
             
@@ -439,6 +485,10 @@ jobs:
           echo "包含resource目录中的程序文件" >> pdf_output/README.md
           echo "优化图片位置控制，确保图片在正确位置" >> pdf_output/README.md
           echo "支持表格内图片正常显示" >> pdf_output/README.md
+          echo "图片下方不显示任何标题标签（完全去掉'图x：'）" >> pdf_output/README.md
+          echo "修复代码块中头文件包含尖括号丢失问题" >> pdf_output/README.md
+          echo "修复链接转换问题" >> pdf_output/README.md
+          echo "修复代码块异常问题" >> pdf_output/README.md
           echo "" >> pdf_output/README.md
           
           echo "## 文件列表" >> pdf_output/README.md
