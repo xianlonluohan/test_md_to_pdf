@@ -228,6 +228,10 @@ jobs:
           \newcolumntype{C}{>{\centering\arraybackslash}p{0.3\textwidth}}
           \newcolumntype{R}{>{\raggedleft\arraybackslash}p{0.2\textwidth}}
           
+          % 去掉图片标签（图x：xxx）
+          \usepackage{caption}
+          \captionsetup[figure]{labelformat=empty}  % 去掉图片标签
+          
           \newcommand\BackgroundPicture{%
             \begin{tikzpicture}[remember picture,overlay]
               \coordinate (page center) at (current page.center);
@@ -439,6 +443,7 @@ jobs:
           echo "包含resource目录中的程序文件" >> pdf_output/README.md
           echo "优化图片位置控制，确保图片在正确位置" >> pdf_output/README.md
           echo "支持表格内图片正常显示" >> pdf_output/README.md
+          echo "已去除图片下方的标签（图x：xxx）" >> pdf_output/README.md
           echo "" >> pdf_output/README.md
           
           echo "## 文件列表" >> pdf_output/README.md
