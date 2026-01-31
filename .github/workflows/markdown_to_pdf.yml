@@ -44,7 +44,7 @@ jobs:
           
           pip3 install beautifulsoup4
       
-      - name: "Create HTML to Markdown converter"
+      - name: "Create HTML to Markdown converter with enhanced image handling"
         run: |
           cat > convert_html.py << 'EOF'
           import os
@@ -62,18 +62,16 @@ jobs:
                   
                   # 提取属性
                   src_match = re.search(r'src\s*=\s*["\']([^"\']+)["\']', attrs_str)
-                  alt_match = re.search(r'alt\s*=\s*["\']([^"\']*)["\']', attrs_str)
                   
                   src = src_match.group(1) if src_match else ''
-                  alt = alt_match.group(1) if alt_match else ''
                   
                   # 清理src路径 - 移除开头的./或/
                   if src:
                       src = re.sub(r'^\./', '', src)
                       src = re.sub(r'^/', '', src)
                   
-                  # 返回Markdown图片格式
-                  return f'![{alt}]({src})'
+                  # 返回Markdown图片格式，但alt文本为空
+                  return f'![](../{src})' if src.startswith('picture/') else f'![]({src})'
               
               content = img_pattern.sub(replace_img_tag, content)
               
@@ -100,6 +98,27 @@ jobs:
               
               return content
           
+          def clean_markdown_images(content):
+              """清理Markdown中的图片，移除alt文本"""
+              # 匹配 ![任意文本](图片路径)
+              pattern = re.compile(r'!\[.*?\]\((.*?)\)')
+              
+              def remove_alt_text(match):
+                  img_path = match.group(1)
+                  return f'[]({img_path})'
+              
+              return pattern.sub(remove_alt_text, content)
+          
+          def remove_image_captions(content):
+              """移除图片下方的标题文本，如"图1: xxx"或": alt text"等"""
+              # 移除单独一行的图片标题
+              content = re.sub(r'^\s*(?:图\s*\d+\s*[:：]?\s*.*|[:：]\s*.*)\s*$', '', content, flags=re.MULTILINE)
+              
+              # 移除行内的图片标题
+              content = re.sub(r'(?:图\s*\d+\s*[:：]?\s*.*|[:：]\s*.*?)(?=\n|$)', '', content)
+              
+              return content
+          
           def process_markdown_file(filepath):
               print(f"处理文件: {filepath}")
               try:
@@ -108,6 +127,12 @@ jobs:
                   
                   # 转换HTML为Markdown
                   processed_content = convert_html_to_markdown(content, filepath)
+                  
+                  # 清理Markdown中的图片alt文本
+                  processed_content = clean_markdown_images(processed_content)
+                  
+                  # 移除图片标题
+                  processed_content = remove_image_captions(processed_content)
                   
                   # 保存处理后的文件
                   with open(filepath, 'w', encoding='utf-8') as f:
@@ -163,7 +188,8 @@ jobs:
           \usepackage{placeins}
           \usepackage{booktabs}
           \usepackage{array}
-          \usepackage{caption} % 添加caption包用于控制标题
+          \usepackage{caption}
+          \usepackage{subcaption}
           
           \definecolor{codebg}{rgb}{0.98,0.98,0.98}
           \definecolor{framecolor}{rgb}{0.8,0.8,0.8}
@@ -229,36 +255,27 @@ jobs:
           \newcolumntype{C}{>{\centering\arraybackslash}p{0.3\textwidth}}
           \newcolumntype{R}{>{\raggedleft\arraybackslash}p{0.2\textwidth}}
           
-          % 禁用图片标题显示 - 去掉"图x："和标签文本
+          % 完全禁用图片标题和标签
           \usepackage{caption}
-          \DeclareCaptionLabelFormat{nolabel}{}
-          \captionsetup[figure]{labelformat=nolabel,textfont=it,labelfont=bf}
-          \setlength{\abovecaptionskip}{0pt}
-          \setlength{\belowcaptionskip}{10pt}
+          \captionsetup[figure]{labelformat=empty, labelsep=none, textformat=empty}
+          \captionsetup[table]{labelformat=empty, labelsep=none, textformat=empty}
           
-          % 如果不想显示任何标题文本，可以取消下面这行的注释
-          % \captionsetup[figure]{labelformat=empty,textformat=empty}
-          
-          % 或者，如果想要完全移除标题区域，可以使用以下方法：
+          % 重写caption命令，彻底移除标题
           \makeatletter
-          \long\def\@makecaption#1#2{%
+          \long\def\@caption##1[##2]##3{%
+            \par
             \ifx\@captype\@undefined
             \else
-              \ifx\@captype\ftype@figure
-                % 对于图片，不显示标题
-              \else
-                \vskip\abovecaptionskip
-                \sbox\@tempboxa{#1: #2}%
-                \ifdim \wd\@tempboxa >\hsize
-                  #1: #2\par
-                \else
-                  \global \@minipagefalse
-                  \hb@xt@\hsize{\hfil\box\@tempboxa\hfil}%
-                \fi
-                \vskip\belowcaptionskip
-              \fi
+              % 完全跳过标题生成
             \fi}
+          
+          \long\def\@makecaption##1##2{%
+            % 完全不做任何事情
+          }
           \makeatother
+          
+          % 完全禁用subcaption
+          \captionsetup[subfigure]{labelformat=empty, labelsep=none, textformat=empty}
           
           \newcommand\BackgroundPicture{%
             \begin{tikzpicture}[remember picture,overlay]
@@ -471,7 +488,7 @@ jobs:
           echo "包含resource目录中的程序文件" >> pdf_output/README.md
           echo "优化图片位置控制，确保图片在正确位置" >> pdf_output/README.md
           echo "支持表格内图片正常显示" >> pdf_output/README.md
-          echo "已移除图片下方的标签文本（图x: 和标签名）" >> pdf_output/README.md
+          echo "已彻底移除图片下方的标签文本和alt文本" >> pdf_output/README.md
           echo "" >> pdf_output/README.md
           
           echo "## 文件列表" >> pdf_output/README.md
