@@ -2,10 +2,10 @@ name: "Markdown to PDF Converter with Tiled Watermark"
 
 on:
   push:
-    branches: ["main", "master"]
-    tags: ["v*", "pdf-*"]
+    branches: ["main", "v*"]
+     tags: ["*"]
   pull_request:
-    branches: ["main", "master"]
+    branches: ["main", "v*"]
   workflow_dispatch:
 
 permissions:
@@ -52,11 +52,9 @@ jobs:
           import sys
           
           def protect_code_blocks(content):
-              """保护代码块，防止被HTML转换处理"""
               code_blocks = []
               protected_content = content
               
-              # 保护代码块（```code```格式）
               def replace_code_block(match):
                   code_blocks.append(match.group(0))
                   return f"@@@CODE_BLOCK_{len(code_blocks)-1}@@@"
@@ -64,7 +62,6 @@ jobs:
               code_pattern = re.compile(r'```(?:[a-zA-Z0-9_+-]*\n)?.*?\n```', re.DOTALL)
               protected_content = code_pattern.sub(replace_code_block, protected_content)
               
-              # 保护内联代码（`code`格式）
               inline_code_blocks = []
               def replace_inline_code(match):
                   inline_code_blocks.append(match.group(0))
@@ -73,7 +70,6 @@ jobs:
               inline_pattern = re.compile(r'`[^`\n]+`')
               protected_content = inline_pattern.sub(replace_inline_code, protected_content)
               
-              # 保护引用块（> 开头的内容）
               quote_blocks = []
               def replace_quote_block(match):
                   quote_blocks.append(match.group(0))
@@ -85,7 +81,6 @@ jobs:
               return protected_content, code_blocks, inline_code_blocks, quote_blocks
           
           def restore_code_blocks(content, code_blocks, inline_code_blocks, quote_blocks):
-              """恢复保护的代码块"""
               restored_content = content
               
               for i, code_block in enumerate(code_blocks):
@@ -103,7 +98,6 @@ jobs:
               return restored_content
           
           def process_images_in_content(content):
-              """处理内容中的图片"""
               lines = content.split('\n')
               processed_lines = []
               in_table = False
@@ -124,7 +118,6 @@ jobs:
               return '\n'.join(processed_lines)
           
           def process_non_table_images(line):
-              """处理非表格内的图片"""
               img_pattern = re.compile(r'<img\s+([^>]+)>', re.IGNORECASE)
               
               def replace_img_tag(match):
@@ -158,7 +151,6 @@ jobs:
               return line
           
           def remove_image_labels_and_figures(content):
-              """完全移除所有图片标签行"""
               lines = content.split('\n')
               processed_lines = []
               
@@ -167,12 +159,10 @@ jobs:
                   line = lines[i]
                   stripped = line.strip()
                   
-                  # 检查是否是图片行
                   if re.search(r'!\[.*\]\(.*\)', line):
                       processed_lines.append(line)
                       i += 1
                       
-                      # 检查接下来的几行是否是图片标签
                       for lookahead in range(min(3, len(lines) - i)):
                           next_line = lines[i + lookahead]
                           next_stripped = next_line.strip()
@@ -183,18 +173,15 @@ jobs:
                               break
                       continue
                   
-                  # 检查是否是独立的图片标签行
                   if re.match(r'^(图\d*[:：]\s*.*|图片\d*[:：]\s*.*|图\s*\d+\s*[:：]\s*.*)$', stripped):
                       i += 1
                       continue
                   
-                  # 检查是否是表格行
                   if stripped.startswith('|') and '|' in stripped[1:]:
                       processed_lines.append(line)
                       i += 1
                       continue
                   
-                  # 检查是否是<center>包裹的图片标签
                   if re.match(r'^<center>图\d*[:：].*</center>$', stripped, re.IGNORECASE):
                       i += 1
                       continue
@@ -206,7 +193,6 @@ jobs:
               return '\n'.join(processed_lines)
           
           def fix_tilde_in_text(content):
-              """修复波浪号显示问题"""
               code_pattern = re.compile(r'```.*?```', re.DOTALL)
               code_blocks = []
               
@@ -238,7 +224,6 @@ jobs:
               return protected_content
           
           def preserve_special_links(content):
-              """保护特殊格式的链接"""
               url_pattern = re.compile(r'<(https?://[^>]+)>')
               
               def replace_url(match):
@@ -250,7 +235,6 @@ jobs:
               return protected_content
           
           def fix_special_characters(content):
-              """修复特殊字符问题"""
               content = re.sub(r'（0,100）', r'（0-100）', content)
               content = re.sub(r'（0\.100）', r'（0-100）', content)
               content = re.sub(r'(\d):(\d)', r'\1-\2', content)
@@ -258,7 +242,6 @@ jobs:
               return content
           
           def fix_text_code_blocks(content):
-              """修复text代码块中的换行问题"""
               text_pattern = re.compile(r'```text\n(.*?)\n```', re.DOTALL)
               
               def fix_text_content(match):
@@ -364,7 +347,6 @@ jobs:
           \usepackage{mdframed}
           \usepackage{xspace}
           
-          % 禁用图片标题
           \usepackage{caption}
           \captionsetup[figure]{labelformat=empty, textformat=empty}
           \usepackage{subcaption}
@@ -372,6 +354,7 @@ jobs:
           
           \definecolor{codebg}{rgb}{0.98,0.98,0.98}
           \definecolor{framecolor}{rgb}{0.8,0.8,0.8}
+          \definecolor{framecolor2}{rgb}{0,0,0.8}
           \definecolor{quotebg}{rgb}{0.97,0.97,0.97}
           \definecolor{quoteframe}{rgb}{0.85,0.85,0.85}
           
@@ -405,7 +388,7 @@ jobs:
             frame=leftline,
             framesep=8pt,
             framerule=3pt,
-            rulecolor=\color{framecolor},
+            rulecolor=\color{framecolor2},
             breaklines=true,
             breakatwhitespace=false,
             breakautoindent=true,
@@ -463,7 +446,7 @@ jobs:
               \pgfmathsetmacro{\pageheight}{\paperheight}
               
               \pgfmathsetmacro{\hcount}{3}
-              \pgfmathsetmacro{\vcount}{5}
+              \pgfmathsetmacro{\vcount}{4}
               \pgfmathsetmacro{\hspace}{\paperwidth/(\hcount+1)}
               \pgfmathsetmacro{\vspace}{\paperheight/(\vcount+1)}
               
@@ -576,7 +559,6 @@ jobs:
             dir_name=$(dirname "$md_file")
             base_name=$(basename "$md_file" .md)
             
-            # 创建输出目录，如果目录不存在
             if [ "$dir_name" != "." ]; then
               mkdir -p "$dir_name"
             fi
@@ -586,7 +568,6 @@ jobs:
             
             set +e
             
-            # 直接在原始目录下生成PDF文件
             pandoc "$md_file" \
               --resource-path="$resource_paths" \
               -o "$dir_name/$base_name.pdf" \
@@ -615,43 +596,31 @@ jobs:
             
             if [ $conversion_status -eq 0 ] && [ -f "$dir_name/$base_name.pdf" ] && [ -s "$dir_name/$base_name.pdf" ]; then
               converted_count=$((converted_count + 1))
-              echo "✓ 生成PDF: $dir_name/$base_name.pdf"
             else
               failed_count=$((failed_count + 1))
-              echo "✗ 生成失败: $dir_name/$base_name.pdf"
             fi
             
             rm -f conversion.log 2>/dev/null || true
           done
           
-          echo "========================================"
-          echo "转换汇总: $converted_count 成功, $failed_count 失败"
-          echo "========================================"
           
           if [ $converted_count -eq 0 ] && [ $failed_count -gt 0 ]; then
-            echo "所有转换都失败了!"
             exit 1
           fi
       
       - name: "Copy resource directories"
         run: |
-          echo "复制resource目录到PDF文件所在目录..."
           
-          # 查找所有PDF文件，复制对应的resource目录
           find . -name "*.pdf" -type f -not -path "./.*" -not -path "*/node_modules/*" | while read pdf_file; do
             pdf_dir=$(dirname "$pdf_file")
             pdf_dir_abs=$(realpath "$pdf_dir")
             
-            # 检查当前目录是否有resource目录
             if [ -d "resource" ] && [ "$pdf_dir_abs" != "." ]; then
-              echo "复制 resource/ 到 $pdf_dir/"
               cp -r "resource" "$pdf_dir/" 2>/dev/null || echo "无法复制 resource 到 $pdf_dir/"
             fi
             
-            # 检查PDF文件所在目录的父目录是否有resource目录
             parent_dir=$(dirname "$pdf_dir")
             if [ -d "$parent_dir/resource" ] && [ "$parent_dir" != "." ]; then
-              echo "复制 $parent_dir/resource 到 $pdf_dir/"
               cp -r "$parent_dir/resource" "$pdf_dir/" 2>/dev/null || echo "无法复制 $parent_dir/resource 到 $pdf_dir/"
             fi
           done
@@ -661,17 +630,7 @@ jobs:
           total_pdfs=$(find . -name "*.pdf" -type f -not -path "./.*" -not -path "*/node_modules/*" 2>/dev/null | wc -l)
           
           if [ $total_pdfs -eq 0 ]; then
-            echo "没有生成PDF文件!"
             exit 1
-          else
-            echo "总共生成 $total_pdfs 个PDF文件"
-            
-            # 显示总大小
-            total_size_mb=$(find . -name "*.pdf" -type f -not -path "./.*" -not -path "*/node_modules/*" -exec stat -c%s {} \; | awk '{sum+=$1} END {print int(sum/1024/1024)}')
-            echo "PDF文件总大小: ${total_size_mb}MB"
-            
-            echo "PDF文件位置:"
-            find . -name "*.pdf" -type f -not -path "./.*" -not -path "*/node_modules/*" | head -20
           fi
       
       - name: "Create zip archive for release"
@@ -679,32 +638,25 @@ jobs:
         run: |
           TAG_NAME="${GITHUB_REF#refs/tags/}"
           
-          # 创建临时目录用于收集所有PDF文件
           mkdir -p pdf_collection
           
-          # 复制所有PDF文件到临时目录，保持目录结构
           find . -name "*.pdf" -type f -not -path "./.*" -not -path "*/node_modules/*" -not -path "./pdf_collection/*" | while read pdf_file; do
             rel_path=${pdf_file#./}
             dir_name=$(dirname "$rel_path")
             
-            # 创建目录结构
             mkdir -p "pdf_collection/$dir_name"
             
-            # 复制PDF文件
             cp "$pdf_file" "pdf_collection/$rel_path"
             
-            # 复制对应的resource目录
             if [ -d "$dir_name/resource" ]; then
               cp -r "$dir_name/resource" "pdf_collection/$dir_name/" 2>/dev/null || true
             fi
           done
           
-          # 创建zip文件
           cd pdf_collection
           zip -r "../pdf-documents-$TAG_NAME.zip" .
           cd ..
           
-          # 清理临时目录
           rm -rf pdf_collection
       
       - name: "Upload PDF artifacts"
@@ -727,29 +679,7 @@ jobs:
             # PDF 文档集
             
             生成时间: $(date '+%Y-%m-%d %H:%M:%S')
-            
-            包含以下功能：
-            - 保护代码块内容，避免<>被移除
-            - 图片位置固定，避免浮动错位
-            - 表格内图片保持原样显示
-            - 代码块字体增大，自动换行优化
-            - 添加平铺式 'emakefun' 水印
-            - 完全移除所有图片标签（图x:标签文本）
-            - 修复特殊字符问题（如0100->0-100）
-            - 修复波浪号(~)显示问题，将范围波浪号替换为连字符
-            - 特殊格式链接转为内联代码
-            - 为引用块添加底色框
-            - 修复text文本框换行问题
-            - 优化水平线显示
-            - 在LaTeX层面禁用图片标题生成
-            
-            ## 文件列表
-            
-            $(find . -name "*.pdf" -type f -not -path "./.*" -not -path "*/node_modules/*" | while read pdf_file; do
-              rel_path=${pdf_file#./}
-              file_size=$(du -h "$pdf_file" | cut -f1)
-              echo "- $rel_path ($file_size)"
-            done)
+      
           files: |
             pdf-documents-${{ github.ref_name }}.zip
           draft: false
