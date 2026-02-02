@@ -559,7 +559,11 @@ jobs:
             return el
           end
           EOF
-            
+      
+      - name: "Set up output directory"
+        run: |
+          mkdir -p pdf_output
+      
       - name: "Convert Markdown to PDF"
         run: |
           MD_FILES=$(find . -name "*.md" -not -path "./.*" -not -path "*/node_modules/*" -not -path "./pdf_output/*" | sed 's/^\.\///')
@@ -576,7 +580,7 @@ jobs:
             dir_name=$(dirname "$md_file")
             base_name=$(basename "$md_file" .md)
             
-            mkdir -p "$dir_name"
+            mkdir -p "pdf_output/$dir_name"
             
             md_dir=$(dirname "$md_file")
             resource_paths="$md_dir:$md_dir/../resource:.:./resource"
@@ -585,7 +589,7 @@ jobs:
             
             pandoc "$md_file" \
               --resource-path="$resource_paths" \
-              -o "$dir_name/$base_name.pdf" \
+              -o "pdf_output/$dir_name/$base_name.pdf" \
               --pdf-engine=xelatex \
               --listings \
               --include-in-header=header.tex \
@@ -624,16 +628,18 @@ jobs:
       
       - name: "Copy resource directories"
         run: |
-          find . -name "*.pdf" -type f -not -path "./pdf_output/*" | while read pdf_file; do
+          find pdf_output -name "*.pdf" -type f | while read pdf_file; do
             pdf_dir=$(dirname "$pdf_file")
-            if [ -d "$pdf_dir/resource" ]; then
-              echo "保持 $pdf_dir/resource 目录"
+            rel_dir=${pdf_dir#pdf_output/}
+            
+            if [ -d "$rel_dir/resource" ]; then
+              cp -r "$rel_dir/resource" "$pdf_dir/" 2>/dev/null || true
             fi
           done
       
       - name: "Verify PDF files"
         run: |
-          total_pdfs=$(find . -name "*.pdf" -type f -not -path "./pdf_output/*" 2>/dev/null | wc -l)
+          total_pdfs=$(find pdf_output -name "*.pdf" -type f 2>/dev/null | wc -l)
           
           if [ $total_pdfs -eq 0 ]; then
             exit 1
@@ -647,33 +653,33 @@ jobs:
             TAG_NAME="latest"
           fi
           
-          echo "# PDF 文档集" > PDF_README.md
-          echo "" >> PDF_README.md
-          echo "生成时间: $(date '+%Y-%m-%d %H:%M:%S')" >> PDF_README.md
-          echo "已优化功能：" >> PDF_README.md
-          echo "1. 保护代码块内容，避免<>被移除" >> PDF_README.md
-          echo "2. 图片位置固定，避免浮动错位" >> PDF_README.md
-          echo "3. 表格内图片保持原样显示" >> PDF_README.md
-          echo "4. 代码块字体增大，自动换行优化" >> PDF_README.md
-          echo "5. 添加平铺式 'emakefun' 水印" >> PDF_README.md
-          echo "6. 完全移除所有图片标签（图x:标签文本）" >> PDF_README.md
-          echo "7. 修复特殊字符问题（如0100->0-100）" >> PDF_README.md
-          echo "8. 修复波浪号(~)显示问题，将范围波浪号替换为连字符" >> PDF_README.md
-          echo "9. 特殊格式链接转为内联代码" >> PDF_README.md
-          echo "10. 为引用块添加底色框" >> PDF_README.md
-          echo "11. 修复text文本框换行问题" >> PDF_README.md
-          echo "12. 优化水平线显示" >> PDF_README.md
-          echo "13. 在LaTeX层面禁用图片标题生成" >> PDF_README.md
-          echo "" >> PDF_README.md
+          echo "# PDF 文档集" > pdf_output/README.md
+          echo "" >> pdf_output/README.md
+          echo "生成时间: $(date '+%Y-%m-%d %H:%M:%S')" >> pdf_output/README.md
+          echo "已优化功能：" >> pdf_output/README.md
+          echo "1. 保护代码块内容，避免<>被移除" >> pdf_output/README.md
+          echo "2. 图片位置固定，避免浮动错位" >> pdf_output/README.md
+          echo "3. 表格内图片保持原样显示" >> pdf_output/README.md
+          echo "4. 代码块字体增大，自动换行优化" >> pdf_output/README.md
+          echo "5. 添加平铺式 'emakefun' 水印" >> pdf_output/README.md
+          echo "6. 完全移除所有图片标签（图x:标签文本）" >> pdf_output/README.md
+          echo "7. 修复特殊字符问题（如0100->0-100）" >> pdf_output/README.md
+          echo "8. 修复波浪号(~)显示问题，将范围波浪号替换为连字符" >> pdf_output/README.md
+          echo "9. 特殊格式链接转为内联代码" >> pdf_output/README.md
+          echo "10. 为引用块添加底色框" >> pdf_output/README.md
+          echo "11. 修复text文本框换行问题" >> pdf_output/README.md
+          echo "12. 优化水平线显示" >> pdf_output/README.md
+          echo "13. 在LaTeX层面禁用图片标题生成" >> pdf_output/README.md
+          echo "" >> pdf_output/README.md
           
-          echo "## 文件列表" >> PDF_README.md
-          echo "" >> PDF_README.md
+          echo "## 文件列表" >> pdf_output/README.md
+          echo "" >> pdf_output/README.md
           
-          PDF_COUNT=$(find . -name "*.pdf" -type f -not -path "./pdf_output/*" 2>/dev/null | wc -l)
+          PDF_COUNT=$(find pdf_output -name "*.pdf" -type f 2>/dev/null | wc -l)
           
           current_dir=""
-          find . -name "*.pdf" -type f -not -path "./pdf_output/*" | sort | while read pdf_file; do
-            rel_path=${pdf_file#./}
+          find pdf_output -name "*.pdf" -type f | sort | while read pdf_file; do
+            rel_path=${pdf_file#pdf_output/}
             dir_name=$(dirname "$rel_path")
             file_name=$(basename "$rel_path")
             file_size=$(du -h "$pdf_file" | cut -f1)
@@ -681,8 +687,8 @@ jobs:
             if [ "$current_dir" != "$dir_name" ]; then
               current_dir="$dir_name"
               if [ "$dir_name" != "." ]; then
-                echo "### $dir_name/" >> PDF_README.md
-                echo "" >> PDF_README.md
+                echo "### $dir_name/" >> pdf_output/README.md
+                echo "" >> pdf_output/README.md
               fi
             fi
             
@@ -692,34 +698,31 @@ jobs:
               resource_exists=" (含resource资源)"
             fi
             
-            echo "- [$file_name]($rel_path) ($file_size)$resource_exists" >> PDF_README.md
+            echo "- [$file_name]($rel_path) ($file_size)$resource_exists" >> pdf_output/README.md
           done
           
-          echo "" >> PDF_README.md
-          total_size_mb=$(find . -name "*.pdf" -type f -not -path "./pdf_output/*" -exec stat -c%s {} \; | awk '{sum+=$1} END {print int(sum/1024/1024)}')
+          echo "" >> pdf_output/README.md
+          total_size_mb=$(find pdf_output -name "*.pdf" -type f -exec stat -c%s {} \; | awk '{sum+=$1} END {print int(sum/1024/1024)}')
           
-          resource_dirs_count=$(find . -type d -name "resource" -not -path "./pdf_output/*" 2>/dev/null | wc -l)
+          resource_dirs_count=$(find pdf_output -type d -name "resource" 2>/dev/null | wc -l)
           
-          echo "总计: $PDF_COUNT 个 PDF 文件, 总大小约 ${total_size_mb}MB, ${resource_dirs_count} 个目录包含resource资源" >> PDF_README.md
+          echo "总计: $PDF_COUNT 个 PDF 文件, 总大小约 ${total_size_mb}MB, ${resource_dirs_count} 个目录包含resource资源" >> pdf_output/README.md
       
       - name: "Create zip archive for release"
         if: startsWith(github.ref, 'refs/tags/')
         run: |
           TAG_NAME="${GITHUB_REF#refs/tags/}"
           
-          find . -name "*.pdf" -type f -not -path "./pdf_output/*" -o -name "resource" -type d | while read file; do
-            zip -r "pdf-documents-$TAG_NAME.zip" "$file"
-          done   
-
+          cd pdf_output
+          zip -r "../pdf-documents-$TAG_NAME.zip" .
+          cd ..
+      
       - name: "Upload PDF artifacts"
         uses: actions/upload-artifact@v4
         with:
           name: pdf-documents
           path: |
-            *.pdf
-            **/*.pdf
-            **/resource/
-            PDF_README.md
+            pdf_output/
             pdf-documents-*.zip
           retention-days: 7
       
