@@ -674,12 +674,7 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ github.ref_name }}
-          name: "PDF Documents - ${{ github.ref_name }}"
-          body: |
-            # PDF 文档集
-            
-            生成时间: $(date '+%Y-%m-%d %H:%M:%S')
-      
+          name: "${{ github.ref_name }}"
           files: |
             pdf-documents-${{ github.ref_name }}.zip
           draft: false
