@@ -3,7 +3,7 @@ name: "Markdown to PDF Converter with Tiled Watermark"
 on:
   push:
     branches: ["main", "v*"]
-     tags: ["*"]
+    tags: ["*"]
   pull_request:
     branches: ["main", "v*"]
   workflow_dispatch:
