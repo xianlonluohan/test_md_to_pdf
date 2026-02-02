@@ -576,7 +576,7 @@ jobs:
             dir_name=$(dirname "$md_file")
             base_name=$(basename "$md_file" .md)
             
-            mkdir -p "$dir_name"
+            mkdir -p "pdf_output/$dir_name"
             
             md_dir=$(dirname "$md_file")
             resource_paths="$md_dir:$md_dir/../resource:.:./resource"
@@ -624,16 +624,17 @@ jobs:
       
       - name: "Copy resource directories"
         run: |
-          find . -name "*.pdf" -type f -not -path "./pdf_output/*" | while read pdf_file; do
+          find . -name "*.pdf" -type f -not -path "./.git/*" -not -path "./pdf_output/*" | while read pdf_file; do
             pdf_dir=$(dirname "$pdf_file")
+            
             if [ -d "$pdf_dir/resource" ]; then
-              echo "保持 $pdf_dir/resource 目录"
+              cp -r "$pdf_dir/resource" "$pdf_dir/" 2>/dev/null || true
             fi
           done
       
       - name: "Verify PDF files"
         run: |
-          total_pdfs=$(find . -name "*.pdf" -type f -not -path "./pdf_output/*" 2>/dev/null | wc -l)
+          total_pdfs=$(find . -name "*.pdf" -type f -not -path "./.git/*" -not -path "./pdf_output/*" 2>/dev/null | wc -l)
           
           if [ $total_pdfs -eq 0 ]; then
             exit 1
@@ -669,10 +670,10 @@ jobs:
           echo "## 文件列表" >> PDF_README.md
           echo "" >> PDF_README.md
           
-          PDF_COUNT=$(find . -name "*.pdf" -type f -not -path "./pdf_output/*" 2>/dev/null | wc -l)
+          PDF_COUNT=$(find pdf_output -name "*.pdf" -type f 2>/dev/null | wc -l)
           
           current_dir=""
-          find . -name "*.pdf" -type f -not -path "./pdf_output/*" | sort | while read pdf_file; do
+          find . -name "*.pdf" -type f -not -path "./.git/*" -not -path "./pdf_output/*" | sort | while read pdf_file; do
             rel_path=${pdf_file#./}
             dir_name=$(dirname "$rel_path")
             file_name=$(basename "$rel_path")
@@ -681,8 +682,8 @@ jobs:
             if [ "$current_dir" != "$dir_name" ]; then
               current_dir="$dir_name"
               if [ "$dir_name" != "." ]; then
-                echo "### $dir_name/" >> PDF_README.md
-                echo "" >> PDF_README.md
+                echo "### $dir_name/" >> pdf_output/README.md
+                echo "" >> pdf_output/README.md
               fi
             fi
             
@@ -692,35 +693,47 @@ jobs:
               resource_exists=" (含resource资源)"
             fi
             
-            echo "- [$file_name]($rel_path) ($file_size)$resource_exists" >> PDF_README.md
+            echo "- [$file_name]($rel_path) ($file_size)$resource_exists" >> pdf_output/README.md
           done
           
-          echo "" >> PDF_README.md
-          total_size_mb=$(find . -name "*.pdf" -type f -not -path "./pdf_output/*" -exec stat -c%s {} \; | awk '{sum+=$1} END {print int(sum/1024/1024)}')
+          echo "" >> pdf_output/README.md
+          total_size_mb=$(find pdf_output -name "*.pdf" -type f -exec stat -c%s {} \; | awk '{sum+=$1} END {print int(sum/1024/1024)}')
           
-          resource_dirs_count=$(find . -type d -name "resource" -not -path "./pdf_output/*" 2>/dev/null | wc -l)
+          resource_dirs_count=$(find pdf_output -type d -name "resource" 2>/dev/null | wc -l)
           
-          echo "总计: $PDF_COUNT 个 PDF 文件, 总大小约 ${total_size_mb}MB, ${resource_dirs_count} 个目录包含resource资源" >> PDF_README.md
+          echo "总计: $PDF_COUNT 个 PDF 文件, 总大小约 ${total_size_mb}MB, ${resource_dirs_count} 个目录包含resource资源" >> pdf_output/README.md
       
       - name: "Create zip archive for release"
         if: startsWith(github.ref, 'refs/tags/')
         run: |
           TAG_NAME="${GITHUB_REF#refs/tags/}"
           
-          find . -name "*.pdf" -type f -not -path "./pdf_output/*" -o -name "resource" -type d | while read file; do
-            zip -r "pdf-documents-$TAG_NAME.zip" "$file"
-          done   
+          mkdir -p temp_pdf_release
+          find . -name "*.pdf" -type f -not -path "./.git/*" -not -path "./temp_pdf_release/*" -not -path "./pdf_output/*" | while read pdf_file; do
+            rel_path=${pdf_file#./}
+            mkdir -p "temp_pdf_release/$(dirname "$rel_path")"
+            cp "$pdf_file" "temp_pdf_release/$rel_path"
+            
+            pdf_dir=$(dirname "$pdf_file")
+            if [ -d "$pdf_dir/resource" ]; then
+              mkdir -p "temp_pdf_release/$(dirname "$rel_path")/resource"
+              cp -r "$pdf_dir/resource"/* "temp_pdf_release/$(dirname "$rel_path")/resource/" 2>/dev/null || true
+
+            fi
+          done
+          cp PDF_README.md temp_pdf_release/     
+          cd temp_pdf_release
+          zip -r "../pdf-documents-$TAG_NAME.zip" .
+          cd ..
 
       - name: "Upload PDF artifacts"
         uses: actions/upload-artifact@v4
         with:
           name: pdf-documents
           path: |
-            *.pdf
-            **/*.pdf
-            **/resource/
             PDF_README.md
             pdf-documents-*.zip
+            **/*.pdf
           retention-days: 7
       
       - name: "Create GitHub Release"
