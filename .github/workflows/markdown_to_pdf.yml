@@ -345,7 +345,7 @@ jobs:
           \setCJKsansfont{Noto Sans CJK SC}
           \setCJKmonofont{Noto Sans Mono CJK SC}
           
-          \usepackage[margin=1.2in]{geometry}
+          \usepackage[margin=1.0in]{geometry}
           
           \usepackage{hyperref}
           \hypersetup{
@@ -597,7 +597,7 @@ jobs:
               -V mainfont="Noto Serif CJK SC" \
               -V sansfont="Noto Sans CJK SC" \
               -V monofont="Noto Sans Mono CJK SC" \
-              -V geometry:margin=1.2in \
+              -V geometry:margin=1.0in \
               -V geometry:a4paper \
               -V colorlinks=true \
               -V linkcolor=blue \
