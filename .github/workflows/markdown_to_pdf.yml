@@ -476,19 +476,11 @@ jobs:
                     rotate=45,
                     scale=1.5,
                     text=gray!30,
-                    opacity=0.4,
+                    opacity=0.45,
                     font=\sffamily\bfseries\small
                   ] {emakefun};
                 }
               }
-              
-              \node at (page center) [
-                rotate=45,
-                scale=3,
-                text=gray!30,
-                opacity=0.6,
-                font=\sffamily\bfseries
-              ] {emakefun};
             \end{tikzpicture}%
           }
           
