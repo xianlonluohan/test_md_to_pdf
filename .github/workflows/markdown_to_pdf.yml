@@ -345,7 +345,7 @@ jobs:
           \setCJKsansfont{Noto Sans CJK SC}
           \setCJKmonofont{Noto Sans Mono CJK SC}
           
-          \usepackage[margin=1.0in]{geometry}
+          \usepackage[margin=1.5cm]{geometry}
           
           \usepackage{hyperref}
           \hypersetup{
@@ -383,7 +383,7 @@ jobs:
             framerule=1pt,
             rulecolor=\color{framecolor},
             breaklines=true,
-            breakatwhitespace=true,
+            breakatwhitespace=false,
             breakautoindent=true,
             breakindent=25pt,
             showstringspaces=false,
@@ -477,7 +477,7 @@ jobs:
                     scale=1.5,
                     text=gray!30,
                     opacity=0.45,
-                    font=\sffamily\bfseries\small
+                    font=\sffamily\bfseries\normalsize  
                   ] {emakefun};
                 }
               }
@@ -597,7 +597,7 @@ jobs:
               -V mainfont="Noto Serif CJK SC" \
               -V sansfont="Noto Sans CJK SC" \
               -V monofont="Noto Sans Mono CJK SC" \
-              -V geometry:margin=1.0in \
+              -V geometry:margin=1.5cm \
               -V geometry:a4paper \
               -V colorlinks=true \
               -V linkcolor=blue \
