@@ -560,9 +560,11 @@ jobs:
           end
           EOF
       
-      
       - name: "Convert Markdown to PDF"
         run: |
+          # 清理旧的PDF文件
+          find . -name "*.pdf" -type f -delete 2>/dev/null || true
+          
           MD_FILES=$(find . -name "*.md" -not -path "./.*" -not -path "*/node_modules/*" -not -path "./pdf_output/*" | sed 's/^\.\///')
           
           IFS=$'\n'
@@ -577,12 +579,15 @@ jobs:
             dir_name=$(dirname "$md_file")
             base_name=$(basename "$md_file" .md)
             
-            mkdir -p "pdf_output/$dir_name"
+            # 创建PDF输出目录（去掉pdf_output层）
+            mkdir -p "$dir_name"
             
             md_dir=$(dirname "$md_file")
             resource_paths="$md_dir:$md_dir/../resource:.:./resource"
             
             set +e
+            
+            echo "正在转换: $md_file -> $dir_name/$base_name.pdf"
             
             pandoc "$md_file" \
               --resource-path="$resource_paths" \
@@ -610,26 +615,39 @@ jobs:
             
             set -e
             
-            if [ $conversion_status -eq 0 ] && [ -f "pdf_output/$dir_name/$base_name.pdf" ] && [ -s "pdf_output/$dir_name/$base_name.pdf" ]; then
+            if [ $conversion_status -eq 0 ] && [ -f "$dir_name/$base_name.pdf" ] && [ -s "$dir_name/$base_name.pdf" ]; then
+              echo "✓ 成功转换: $dir_name/$base_name.pdf"
               converted_count=$((converted_count + 1))
             else
+              echo "✗ 转换失败: $md_file"
               failed_count=$((failed_count + 1))
+              
+              if [ -f "conversion.log" ]; then
+                echo "转换日志:"
+                cat conversion.log
+              fi
             fi
             
             rm -f conversion.log 2>/dev/null || true
           done
           
+          echo "========================================"
+          echo "转换汇总: $converted_count 成功, $failed_count 失败"
+          echo "========================================"
+          
           if [ $converted_count -eq 0 ] && [ $failed_count -gt 0 ]; then
+            echo "所有转换都失败了!"
             exit 1
           fi
       
       - name: "Copy resource directories"
         run: |
-          find . -name "*.pdf" -type f | while read pdf_file; do
+          # 复制resource目录到每个有PDF文件的目录
+          find . -name "*.pdf" -type f -not -path "./.*" -not -path "*/node_modules/*" | while read pdf_file; do
             pdf_dir=$(dirname "$pdf_file")
             
-            # 检查PDF文件所在目录是否有对应的resource目录
-            if [ -d "resource" ]; then
+            # 如果存在resource目录，就复制到PDF所在目录
+            if [ -d "resource" ] && [ ! -d "$pdf_dir/resource" ]; then
               echo "复制 resource 到 $pdf_dir/"
               cp -r "resource" "$pdf_dir/" 2>/dev/null || true
             fi
@@ -640,24 +658,89 @@ jobs:
           total_pdfs=$(find . -name "*.pdf" -type f -not -path "./.*" -not -path "*/node_modules/*" 2>/dev/null | wc -l)
           
           if [ $total_pdfs -eq 0 ]; then
+            echo "错误: 没有生成PDF文件!"
             exit 1
+          else
+            echo "成功: 总共生成 $total_pdfs 个PDF文件"
+            echo "PDF文件列表:"
+            find . -name "*.pdf" -type f -not -path "./.*" -not -path "*/node_modules/*" | sort
           fi
+      
+      - name: "Create minimal README for release"
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          TAG_NAME="${GITHUB_REF#refs/tags/}"
+          
+          echo "# PDF 文档集 - $TAG_NAME" > RELEASE_README.md
+          echo "" >> RELEASE_README.md
+          echo "生成时间: $(date '+%Y-%m-%d %H:%M:%S')" >> RELEASE_README.md
+          echo "" >> RELEASE_README.md
+          echo "包含以下PDF文件:" >> RELEASE_README.md
+          echo "" >> RELEASE_README.md
+          
+          find . -name "*.pdf" -type f -not -path "./.*" -not -path "*/node_modules/*" | sort | while read pdf_file; do
+            file_name=$(basename "$pdf_file")
+            dir_name=$(dirname "$pdf_file")
             
+            if [ "$dir_name" != "." ]; then
+              echo "- $dir_name/$file_name" >> RELEASE_README.md
+            else
+              echo "- $file_name" >> RELEASE_README.md
+            fi
+          done
+          
+          echo "" >> RELEASE_README.md
+          echo "总计: $total_pdfs 个 PDF 文件" >> RELEASE_README.md
+      
       - name: "Create zip archive for release"
         if: startsWith(github.ref, 'refs/tags/')
         run: |
           TAG_NAME="${GITHUB_REF#refs/tags/}"
           
-          # 直接在根目录创建zip文件
-          zip -r "pdf-documents-$TAG_NAME.zip" . -x "*.git*" "node_modules/*" "__pycache__/*" ".*" "*.md" "*.yml" "*.py" "*.tex" "*.lua"
+          # 创建zip文件，包含所有PDF文件和相关资源
+          echo "创建归档文件: pdf-documents-$TAG_NAME.zip"
+          
+          # 首先创建一个临时目录来组织文件
+          mkdir -p "temp_archive"
+          
+          # 复制所有PDF文件和resource目录
+          find . -name "*.pdf" -type f -not -path "./.*" -not -path "*/node_modules/*" -not -path "./temp_archive/*" | while read pdf_file; do
+            dir_name=$(dirname "$pdf_file")
+            mkdir -p "temp_archive/$dir_name"
+            cp "$pdf_file" "temp_archive/$dir_name/"
+            
+            # 如果PDF所在目录有resource，也复制
+            if [ -d "$dir_name/resource" ]; then
+              cp -r "$dir_name/resource" "temp_archive/$dir_name/" 2>/dev/null || true
+            fi
+          done
+          
+          # 复制根目录的resource（如果存在）
+          if [ -d "resource" ]; then
+            cp -r "resource" "temp_archive/" 2>/dev/null || true
+          fi
+          
+          # 复制README文件
+          if [ -f "RELEASE_README.md" ]; then
+            cp "RELEASE_README.md" "temp_archive/"
+          fi
+          
+          # 创建zip文件
+          cd temp_archive
+          zip -r "../pdf-documents-$TAG_NAME.zip" .
+          cd ..
+          
+          # 清理临时目录
+          rm -rf "temp_archive"
       
       - name: "Upload PDF artifacts"
         uses: actions/upload-artifact@v4
         with:
           name: pdf-documents
           path: |
-            *.pdf
+            **/*.pdf
             pdf-documents-*.zip
+            RELEASE_README.md
           retention-days: 7
       
       - name: "Create GitHub Release"
@@ -667,7 +750,7 @@ jobs:
         with:
           tag_name: ${{ github.ref_name }}
           name: "PDF Documents - ${{ github.ref_name }}"
-          body_path: pdf_output/README.md
+          body_path: RELEASE_README.md  # 使用新创建的README文件
           files: |
             pdf-documents-${{ github.ref_name }}.zip
           draft: false
