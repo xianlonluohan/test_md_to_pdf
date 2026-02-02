@@ -608,21 +608,55 @@ jobs:
             exit 1
           fi
       
-      - name: "Copy resource directories"
+      - name: "Copy resource directories (cleaned)"
         run: |
+          echo "复制resource目录到PDF文件所在目录..."
           
-          find . -name "*.pdf" -type f -not -path "./.*" -not -path "*/node_modules/*" | while read pdf_file; do
-            pdf_dir=$(dirname "$pdf_file")
-            pdf_dir_abs=$(realpath "$pdf_dir")
+          # 获取所有包含PDF文件的目录（去重）
+          pdf_dirs=$(find . -name "*.pdf" -type f -not -path "./.*" -not -path "*/node_modules/*" -not -path "*/resource/*" | xargs -I {} dirname {} | sort -u)
+          
+          for pdf_dir in $pdf_dirs; do
+            echo "处理目录: $pdf_dir"
             
-            if [ -d "resource" ] && [ "$pdf_dir_abs" != "." ]; then
-              cp -r "resource" "$pdf_dir/" 2>/dev/null || echo "无法复制 resource 到 $pdf_dir/"
+            # 检查目标目录是否已经有resource目录
+            if [ -d "$pdf_dir/resource" ]; then
+              echo "  ✓ 目录已存在resource，跳过"
+              continue
             fi
             
+            # 检查当前目录是否有resource目录
+            if [ -d "./resource" ] && [ "$pdf_dir" != "." ]; then
+              echo "  → 从根目录复制resource到 $pdf_dir/"
+              # 使用rsync排除resource目录本身和PDF文件
+              if command -v rsync >/dev/null 2>&1; then
+                rsync -av --exclude='*.pdf' --exclude='resource/' ./resource/ "$pdf_dir/resource/" 2>/dev/null || echo "无法复制"
+              else
+                # 如果没有rsync，使用find和cp
+                mkdir -p "$pdf_dir/resource"
+                find ./resource -type f ! -name "*.pdf" -exec cp --parents {} "$pdf_dir/" 2>/dev/null \; || echo "部分文件无法复制"
+              fi
+            fi
+            
+            # 检查父目录是否有resource目录
             parent_dir=$(dirname "$pdf_dir")
             if [ -d "$parent_dir/resource" ] && [ "$parent_dir" != "." ]; then
-              cp -r "$parent_dir/resource" "$pdf_dir/" 2>/dev/null || echo "无法复制 $parent_dir/resource 到 $pdf_dir/"
+              echo "  → 从父目录 $parent_dir 复制resource到 $pdf_dir/"
+              if command -v rsync >/dev/null 2>&1; then
+                rsync -av --exclude='*.pdf' --exclude='resource/' "$parent_dir/resource/" "$pdf_dir/resource/" 2>/dev/null || echo "无法复制"
+              else
+                mkdir -p "$pdf_dir/resource"
+                find "$parent_dir/resource" -type f ! -name "*.pdf" -exec cp --parents {} "$pdf_dir/" 2>/dev/null \; || echo "部分文件无法复制"
+              fi
             fi
+            
+            # 清理嵌套的resource目录
+            if [ -d "$pdf_dir/resource/resource" ]; then
+              echo "  → 清理嵌套的resource目录"
+              rm -rf "$pdf_dir/resource/resource"
+            fi
+            
+            # 清理可能存在的PDF文件
+            find "$pdf_dir/resource" -name "*.pdf" -type f -delete 2>/dev/null || true
           done
       
       - name: "Verify PDF files"
@@ -640,7 +674,8 @@ jobs:
           
           mkdir -p pdf_collection
           
-          find . -name "*.pdf" -type f -not -path "./.*" -not -path "*/node_modules/*" -not -path "./pdf_collection/*" | while read pdf_file; do
+          # 查找所有PDF文件，排除resource目录中的PDF
+          find . -name "*.pdf" -type f -not -path "./.*" -not -path "*/node_modules/*" -not -path "./pdf_collection/*" -not -path "*/resource/*" | while read pdf_file; do
             rel_path=${pdf_file#./}
             dir_name=$(dirname "$rel_path")
             
@@ -648,8 +683,15 @@ jobs:
             
             cp "$pdf_file" "pdf_collection/$rel_path"
             
+            # 只复制与PDF文件同级或上级的resource目录，排除包含PDF的resource
             if [ -d "$dir_name/resource" ]; then
-              cp -r "$dir_name/resource" "pdf_collection/$dir_name/" 2>/dev/null || true
+              # 检查resource目录是否包含PDF，如果包含则不复制
+              pdf_in_resource=$(find "$dir_name/resource" -name "*.pdf" -type f 2>/dev/null | head -1)
+              if [ -z "$pdf_in_resource" ]; then
+                cp -r "$dir_name/resource" "pdf_collection/$dir_name/" 2>/dev/null || true
+              else
+                echo "跳过包含PDF的resource目录: $dir_name/resource"
+              fi
             fi
           done
           
